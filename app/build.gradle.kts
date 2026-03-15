@@ -70,10 +70,10 @@ dependencies {
     implementation(platform("io.github.jan-tennert.supabase:bom:3.3.0"))
 
     // Os 4 pilares do app no Supabase:
-    implementation("io.github.jan-tennert.supabase:postgrest-kt") // Banco de Dados (Mensagens e Contatos)
-    implementation("io.github.jan-tennert.supabase:auth-kt")      // Autenticação (Login e Cadastro)
-    implementation("io.github.jan-tennert.supabase:storage-kt")   // Arquivos (Envio de Áudio e Fotos)
-    implementation("io.github.jan-tennert.supabase:realtime-kt")  // Sincronização em tempo real (O Chat ao vivo)
+    implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.github.jan-tennert.supabase:auth-kt")
+    implementation("io.github.jan-tennert.supabase:storage-kt")
+    implementation("io.github.jan-tennert.supabase:realtime-kt")
 
     // O motor exigido pelo Supabase (Rede e JSON)
     implementation("io.ktor:ktor-client-android:3.2.1")
@@ -81,6 +81,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.1")
 
     implementation("androidx.compose.material:material-icons-extended")
+
+    implementation("io.coil-kt:coil-compose:2.5.0")
+    implementation("io.github.jan-tennert.supabase:storage-kt:3.3.0")
 }
 
 configurations.all {
