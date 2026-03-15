@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,8 +23,11 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
@@ -43,9 +47,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.example.resenha.data.Conversation
 import com.example.resenha.network.SupabaseClient
+import com.google.android.gms.location.LocationServices
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.realtime.PostgresAction
@@ -85,12 +91,23 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
     var messages by remember { mutableStateOf(listOf<ChatMessage>()) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var contactName by remember { mutableStateOf("Carregando...") }
-    val currentUserId = SupabaseClient.client.auth.currentUserOrNull()?.id ?: ""
+
+    // CORREÇÃO AQUI: "remember" guarda o ID na memória para não o perdermos ao abrir a galeria/câmera
+    val currentUserId = remember { SupabaseClient.client.auth.currentUserOrNull()?.id ?: "" }
 
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     var isUploading by remember { mutableStateOf(false) }
     var expandedImageUrl by remember { mutableStateOf<String?>(null) }
+    var showAttachmentMenu by remember { mutableStateOf(false) }
+
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(0)
+        }
+    }
 
     val mediaPlayer = remember {
         MediaPlayer().apply {
@@ -108,9 +125,107 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         onDispose { mediaPlayer.release() }
     }
 
+    var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
     var isRecording by remember { mutableStateOf(false) }
     var mediaRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var audioTempFile by remember { mutableStateOf<File?>(null) }
+    val locationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+
+    fun recarregarMensagens() {
+        scope.launch {
+            try {
+                val msgs = SupabaseClient.client.from("messages")
+                    .select { filter { eq("conversation_id", conversationId) } }.decodeList<ChatMessage>()
+
+                messages = msgs.sortedBy { it.created_at }
+
+                val mensagensNaoLidas = msgs.filter { it.sender_id != currentUserId && it.status != "lida" }
+                if (mensagensNaoLidas.isNotEmpty()) {
+                    SupabaseClient.client.from("messages").update(
+                        { set("status", "lida") }
+                    ) {
+                        filter {
+                            eq("conversation_id", conversationId)
+                            neq("sender_id", currentUserId)
+                            neq("status", "lida")
+                        }
+                    }
+                    SupabaseClient.client.from("conversations").update(
+                        { set("last_message_status", "lida") }
+                    ) { filter { eq("id", conversationId) } }
+                }
+            } catch (e: Exception) {}
+        }
+    }
+
+    val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success && cameraImageUri != null) {
+            isUploading = true
+            errorMessage = null
+            scope.launch {
+                try {
+                    val bytes = context.contentResolver.openInputStream(cameraImageUri!!)?.use { it.readBytes() }
+                    if (bytes != null) {
+                        val fileName = "${UUID.randomUUID()}.jpg"
+
+                        SupabaseClient.client.storage.from("resenha").upload(fileName, bytes)
+                        val publicUrl = SupabaseClient.client.storage.from("resenha").publicUrl(fileName)
+
+                        val timeFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
+                        timeFormat.timeZone = TimeZone.getTimeZone("UTC")
+                        val currentTime = timeFormat.format(Date())
+
+                        SupabaseClient.client.from("messages").insert(
+                            mapOf(
+                                "conversation_id" to conversationId,
+                                "sender_id" to currentUserId,
+                                "content" to "📷 Imagem da Câmera",
+                                "status" to "enviada",
+                                "media_url" to publicUrl,
+                                "media_type" to "image"
+                            )
+                        )
+                        SupabaseClient.client.from("conversations").update(
+                            {
+                                set("last_message", "📷 Imagem da Câmera")
+                                set("last_message_sender_id", currentUserId)
+                                set("last_message_status", "enviada")
+                                set("last_message_time", currentTime)
+                            }
+                        ) { filter { eq("id", conversationId) } }
+
+                        recarregarMensagens()
+                    }
+                } catch (e: Exception) {
+                    errorMessage = "Erro ao enviar foto da câmera: ${e.message}"
+                } finally {
+                    isUploading = false
+                }
+            }
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if (isGranted) {
+            try {
+                val imagesFolder = File(context.cacheDir, "camera_images")
+                imagesFolder.mkdirs()
+                val tempImageFile = File(imagesFolder, "foto_${UUID.randomUUID()}.jpg")
+
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    context.packageName + ".provider",
+                    tempImageFile
+                )
+                cameraImageUri = uri
+                takePictureLauncher.launch(uri)
+            } catch (e: Exception) {
+                errorMessage = "Erro ao abrir câmera: ${e.message}"
+            }
+        } else {
+            errorMessage = "Permissão de câmera negada."
+        }
+    }
 
     fun stopRecordingAndSend() {
         if (!isRecording) return
@@ -156,6 +271,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     ) { filter { eq("id", conversationId) } }
 
                     audioTempFile?.delete()
+                    recarregarMensagens()
                 }
             } catch (e: Exception) {
                 errorMessage = "Erro ao enviar voz: ${e.message}"
@@ -193,29 +309,59 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         }
     }
 
-    fun recarregarMensagens() {
+    fun sendLocationMessage(lat: Double, lon: Double) {
+        val mapsLink = "https://maps.google.com/?q=$lat,$lon"
         scope.launch {
             try {
-                val msgs = SupabaseClient.client.from("messages")
-                    .select { filter { eq("conversation_id", conversationId) } }.decodeList<ChatMessage>()
-                messages = msgs
+                val timeFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
+                timeFormat.timeZone = TimeZone.getTimeZone("UTC")
+                val currentTime = timeFormat.format(Date())
 
-                val mensagensNaoLidas = msgs.filter { it.sender_id != currentUserId && it.status != "lida" }
-                if (mensagensNaoLidas.isNotEmpty()) {
-                    SupabaseClient.client.from("messages").update(
-                        { set("status", "lida") }
-                    ) {
-                        filter {
-                            eq("conversation_id", conversationId)
-                            neq("sender_id", currentUserId)
-                            neq("status", "lida")
-                        }
+                SupabaseClient.client.from("messages").insert(
+                    mapOf(
+                        "conversation_id" to conversationId,
+                        "sender_id" to currentUserId,
+                        "content" to "📍 Localização Atual",
+                        "status" to "enviada",
+                        "media_url" to mapsLink,
+                        "media_type" to "location"
+                    )
+                )
+                SupabaseClient.client.from("conversations").update(
+                    {
+                        set("last_message", "📍 Localização")
+                        set("last_message_sender_id", currentUserId)
+                        set("last_message_status", "enviada")
+                        set("last_message_time", currentTime)
                     }
-                    SupabaseClient.client.from("conversations").update(
-                        { set("last_message_status", "lida") }
-                    ) { filter { eq("id", conversationId) } }
+                ) { filter { eq("id", conversationId) } }
+
+                recarregarMensagens()
+            } catch (e: Exception) {
+                errorMessage = "Erro ao enviar localização: ${e.message}"
+            }
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (granted) {
+            try {
+                locationClient.lastLocation.addOnSuccessListener { location ->
+                    if (location != null) {
+                        sendLocationMessage(location.latitude, location.longitude)
+                    } else {
+                        errorMessage = "GPS não encontrou sua posição. Abra o Google Maps uma vez e tente novamente."
+                    }
                 }
-            } catch (e: Exception) {}
+            } catch (e: SecurityException) {
+                errorMessage = "Erro de segurança ao acessar GPS."
+            }
+        } else {
+            errorMessage = "Permissão de localização negada."
         }
     }
 
@@ -244,8 +390,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     val fileSizeInMB = fileSize / (1024.0 * 1024.0)
                     if (fileSizeInMB > 15.0) {
                         val sizeStr = (fileSizeInMB * 10.0).toInt() / 10.0
-                        // MENSAGEM MAIS AMIGÁVEL
-                        errorMessage = "Oops! O arquivo tem ${sizeStr} MB. Para não estourar o servidor, envie arquivos de até 15 MB! 😅"
+                        errorMessage = "Oops! O arquivo tem ${sizeStr} MB. O limite de envio é 15 MB! 😅"
                         isUploading = false
                         return@launch
                     }
@@ -359,7 +504,11 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         containerColor = Color(0xFFF5F7FF)
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp), reverseLayout = true) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
+                reverseLayout = true
+            ) {
                 items(messages.reversed(), key = { it.id }) { msg ->
                     val isMine = msg.sender_id == currentUserId
                     Row(
@@ -410,6 +559,27 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Text(
                                                 text = "Vídeo\nToque para reproduzir",
+                                                color = if (isMine) Color.White else Color.Black,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                    } else if (msg.media_type == "location") {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .fillMaxWidth(0.8f)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color.Black.copy(alpha = 0.1f))
+                                                .clickable { uriHandler.openUri(msg.media_url) }
+                                                .padding(12.dp)
+                                        ) {
+                                            Text("📍", fontSize = 28.sp)
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "Localização Atual\nToque para abrir no mapa",
                                                 color = if (isMine) Color.White else Color.Black,
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Medium,
@@ -506,7 +676,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 }
             }
 
-            // --- NOVO BANNER DE ERRO ELEGANTE ---
             if (errorMessage != null) {
                 Card(
                     modifier = Modifier
@@ -546,7 +715,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     }
                 }
             }
-            // ------------------------------------
 
             Row(modifier = Modifier.fillMaxWidth().background(Color.White).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (isUploading) {
@@ -567,8 +735,80 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         Icon(Icons.Default.Stop, null, tint = Color.White)
                     }
                 } else {
-                    IconButton(onClick = { fileLauncher.launch("*/*") }) {
-                        Icon(Icons.Default.AttachFile, null, tint = blueColor)
+
+                    Box {
+                        IconButton(onClick = { showAttachmentMenu = true }) {
+                            Icon(Icons.Default.AttachFile, contentDescription = "Anexos", tint = blueColor)
+                        }
+
+                        DropdownMenu(
+                            expanded = showAttachmentMenu,
+                            onDismissRequest = { showAttachmentMenu = false },
+                            modifier = Modifier.background(Color.White)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Galeria / Arquivos", color = Color.Black) },
+                                leadingIcon = { Icon(Icons.Default.Image, contentDescription = null, tint = blueColor) },
+                                onClick = {
+                                    showAttachmentMenu = false
+                                    fileLauncher.launch("*/*")
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Câmera", color = Color.Black) },
+                                leadingIcon = { Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = blueColor) },
+                                onClick = {
+                                    showAttachmentMenu = false
+                                    val hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                                    if (hasPermission) {
+                                        try {
+                                            val imagesFolder = File(context.cacheDir, "camera_images")
+                                            imagesFolder.mkdirs()
+                                            val tempImageFile = File(imagesFolder, "foto_${UUID.randomUUID()}.jpg")
+
+                                            val uri = FileProvider.getUriForFile(
+                                                context,
+                                                context.packageName + ".provider",
+                                                tempImageFile
+                                            )
+                                            cameraImageUri = uri
+                                            takePictureLauncher.launch(uri)
+                                        } catch (e: Exception) {
+                                            errorMessage = "Erro ao abrir câmera. Verifique o FileProvider."
+                                        }
+                                    } else {
+                                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Localização Atual", color = Color.Black) },
+                                leadingIcon = { Icon(Icons.Default.LocationOn, contentDescription = null, tint = blueColor) },
+                                onClick = {
+                                    showAttachmentMenu = false
+                                    val hasFineLocation = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                                    val hasCoarseLocation = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+                                    if (hasFineLocation || hasCoarseLocation) {
+                                        try {
+                                            locationClient.lastLocation.addOnSuccessListener { location ->
+                                                if (location != null) {
+                                                    sendLocationMessage(location.latitude, location.longitude)
+                                                } else {
+                                                    errorMessage = "GPS não encontrou sua posição. Abra o Google Maps uma vez e tente novamente."
+                                                }
+                                            }
+                                        } catch (e: SecurityException) {
+                                            errorMessage = "Erro ao acessar o GPS."
+                                        }
+                                    } else {
+                                        locationPermissionLauncher.launch(
+                                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                                        )
+                                    }
+                                }
+                            )
+                        }
                     }
 
                     OutlinedTextField(

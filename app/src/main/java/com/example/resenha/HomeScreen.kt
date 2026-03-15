@@ -69,14 +69,9 @@ fun HomeScreen(
     var previousUnreadCount by remember { mutableStateOf(0) }
     var isInitialLoad by remember { mutableStateOf(true) }
 
-    // --- CÓDIGO DO POP-UP DE PERMISSÃO (ANDROID 13+) ---
     val launcher = rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
-        onResult = { isGranted ->
-            if (!isGranted) {
-                // Se o usuário negar, a notificação não vai aparecer
-            }
-        }
+        onResult = { isGranted -> }
     )
 
     LaunchedEffect(Unit) {
@@ -110,7 +105,7 @@ fun HomeScreen(
 
                 val unreadMap = unreadMsgs.groupBy { it.conversation_id }.mapValues { it.value.size }
 
-                // --- LÓGICA DE DISPARO DA NOTIFICAÇÃO PUSH LOCAL ---
+                // --- LÓGICA CORRIGIDA: DISPARO DA NOTIFICAÇÃO ---
                 val totalUnreadNow = unreadMsgs.size
 
                 if (!isInitialLoad) {
@@ -125,7 +120,7 @@ fun HomeScreen(
                         )
                     }
                 } else {
-                    isInitialLoad = false // Primeira carga finalizada
+                    isInitialLoad = false
                 }
 
                 previousUnreadCount = totalUnreadNow
@@ -237,7 +232,6 @@ fun HomeScreen(
 @Composable
 fun ConversationItem(item: ChatItemUiState, currentUserId: String, blueColor: Color, badgeColor: Color, onClick: () -> Unit) {
 
-    // Função interna para limpar e formatar a hora corretamente
     fun formatTimeDisplay(rawTime: String?): String {
         if (rawTime.isNullOrEmpty()) return ""
         if (rawTime.length <= 5) return rawTime
