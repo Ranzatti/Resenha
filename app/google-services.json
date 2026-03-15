@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "814896992354",
+    "project_id": "resenha-e4b05",
+    "storage_bucket": "resenha-e4b05.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:814896992354:android:8ae00887eedb9b913ac13b",
+        "android_client_info": {
+          "package_name": "com.example.resenha"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBxhwNNosxJxbQlhzRFwtYXG6Ick9jxcGI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
