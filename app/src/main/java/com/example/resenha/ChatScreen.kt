@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Warning
@@ -57,6 +58,8 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -95,7 +98,6 @@ import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.serialization.InternalSerializationApi
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -103,7 +105,7 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 
-@OptIn(ExperimentalMaterial3Api::class, InternalSerializationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(conversationId: String, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -123,10 +125,14 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
 
     var showDeleteDialog by remember { mutableStateOf(false) }
 
+    // --- VARIÁVEIS DE PESQUISA ---
+    var isSearchActive by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+
     val listState = rememberLazyListState()
 
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
+        if (messages.isNotEmpty() && !isSearchActive) {
             listState.animateScrollToItem(0)
         }
     }
@@ -519,7 +525,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         }
     }
 
-    // --- CAIXA DE DIÁLOGO DE EXCLUSÃO (AGORA COM LIMPEZA PROFUNDA SEGURA) ---
+    // --- CAIXA DE DIÁLOGO DE EXCLUSÃO ---
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
@@ -543,7 +549,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
 
                     scope.launch {
                         try {
-                            // 1. Procurar as fotos/áudios que VOCÊ enviou
                             val myMediaMsgs = SupabaseClient.client.from("messages")
                                 .select {
                                     filter {
@@ -556,33 +561,29 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                             val mediaUrls = myMediaMsgs.mapNotNull { it.media_url }
                                 .filter { it.contains("supabase.co/storage/v1/object/public/resenha/") }
 
-                            // 2. Apagar os ficheiros de multimédia de uma só vez (Lista)
                             if (mediaUrls.isNotEmpty()) {
                                 val fileNames = mediaUrls.map { it.substringAfterLast("/") }
                                 try {
                                     SupabaseClient.client.storage.from("resenha").delete(fileNames)
-                                } catch (e: Exception) {
-                                    // Ignorar se o ficheiro já não estiver lá
-                                }
+                                } catch (e: Exception) {}
                             }
 
-                            // 3. Plano B: Apagar mensagens manualmente para evitar falhas do Cascade
+                            // Plano B: Tentar apagar mensagens caso o Cascade falhe
                             try {
                                 SupabaseClient.client.from("messages").delete {
                                     filter { eq("conversation_id", conversationId) }
                                 }
                             } catch (e: Exception) {}
 
-                            // 4. Apagar a conversa
                             SupabaseClient.client.from("conversations").delete {
                                 filter { eq("id", conversationId) }
                             }
 
                             isUploading = false
-                            onBack() // Volta ao ecrã inicial
+                            onBack()
                         } catch (e: Exception) {
                             isUploading = false
-                            errorMessage = "Erro RLS: Verifique as Policies no Supabase! ${e.message}"
+                            errorMessage = "Erro ao eliminar: Certifique-se de que ativou o Cascade no Supabase!"
                         }
                     }
                 }) { Text("Eliminar Tudo", color = Color.Red, fontWeight = FontWeight.Bold) }
@@ -594,20 +595,70 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         )
     }
 
+    // --- LÓGICA DE FILTRAGEM LOCAL DE MENSAGENS ---
+    val displayedMessages = remember(messages, searchQuery) {
+        if (searchQuery.isBlank()) {
+            messages
+        } else {
+            messages.filter { it.content.contains(searchQuery, ignoreCase = true) }
+        }
+    }
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(contactName, fontWeight = FontWeight.Bold, color = Color.Black) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.Black) }
-                },
-                actions = {
-                    IconButton(onClick = { showDeleteDialog = true }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Excluir Conversa", tint = Color.Red)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
+            if (isSearchActive) {
+                TopAppBar(
+                    title = {
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Buscar na conversa...", color = Color.Gray) },
+                            singleLine = true,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                focusedTextColor = Color.Black,
+                                unfocusedTextColor = Color.Black
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            isSearchActive = false
+                            searchQuery = ""
+                        }) {
+                            Icon(Icons.Default.ArrowBack, null, tint = Color.Black)
+                        }
+                    },
+                    actions = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Close, null, tint = Color.Black)
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            } else {
+                TopAppBar(
+                    title = { Text(contactName, fontWeight = FontWeight.Bold, color = Color.Black) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.Black) }
+                    },
+                    actions = {
+                        IconButton(onClick = { isSearchActive = true }) {
+                            Icon(Icons.Default.Search, contentDescription = "Buscar", tint = Color.Black)
+                        }
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Excluir Conversa", tint = Color.Red)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            }
         },
         containerColor = Color(0xFFF5F7FF)
     ) { padding ->
@@ -617,7 +668,8 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
                 reverseLayout = true
             ) {
-                items(messages.reversed(), key = { it.id }) { msg ->
+                // USA A LISTA FILTRADA
+                items(displayedMessages.reversed(), key = { it.id }) { msg ->
                     val isMine = msg.sender_id == currentUserId
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
