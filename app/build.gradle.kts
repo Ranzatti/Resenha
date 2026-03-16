@@ -34,7 +34,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlin {
-        jvmToolchain(17)
+        jvmToolchain(21)
     }
     buildFeatures {
         compose = true
@@ -77,6 +77,9 @@ dependencies {
 
     // O motor exigido pelo Supabase (Rede e JSON)
     implementation("io.ktor:ktor-client-android:3.2.1")
+    implementation("io.ktor:ktor-client-websockets:3.0.0")
+
+
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.1")
 

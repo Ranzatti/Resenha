@@ -2,7 +2,8 @@ package com.example.resenha
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -41,7 +43,8 @@ data class MessageBadge(
     val sender_id: String,
     val content: String? = null,
     val created_at: String? = null,
-    val status: String = "enviada"
+    val status: String = "enviada",
+    val is_pinned: Boolean = false
 )
 
 data class ChatItemUiState(
@@ -57,6 +60,8 @@ fun HomeScreen(
     onNewChatClick: () -> Unit,
     onLogoutClick: () -> Unit
 ) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
     val scope = rememberCoroutineScope()
     val blueColor = Color(0xFF94ADFF)
     val whatsappGreen = Color(0xFF25D366)
@@ -133,7 +138,12 @@ fun HomeScreen(
                     ChatItemUiState(conversation = conv, contactName = name, unreadCount = count)
                 }
 
-                conversationsList = mappedList.sortedByDescending { it.unreadCount > 0 }
+                //conversationsList = mappedList.sortedByDescending { it.unreadCount > 0 }
+                conversationsList = mappedList.sortedWith (
+                    compareByDescending<ChatItemUiState> { it.conversation.is_pinned }
+                        .thenByDescending { it.unreadCount > 0 }
+                        .thenByDescending { it.conversation.last_message_time }
+                )
 
                 val convsToUpdate = mappedList.filter {
                     it.conversation.last_message_sender_id != currentUserId &&
@@ -163,6 +173,26 @@ fun HomeScreen(
             } catch (e: Exception) {
             } finally {
                 isLoading = false
+            }
+        }
+    }
+
+
+    fun togglePin(item: ChatItemUiState) {
+        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress) // VIBRAÇÃO
+        scope.launch {
+            try {
+                SupabaseClient.client.from("conversations").update(
+                    {
+                        set("is_pinned", !item.conversation.is_pinned)
+                    }
+                ) {
+                    filter { eq("id", item.conversation.id) }
+                }
+                // Recarrega a lista para ordenar novamente
+                loadConversations()
+            } catch (e: Exception) {
+                println("Erro ao fixar: ${e.message}")
             }
         }
     }
@@ -220,17 +250,25 @@ fun HomeScreen(
                 Text("Toque no + para buscar pessoas!", color = Color.DarkGray)
             }
         } else {
+            // No final da HomeScreen
             LazyColumn(modifier = Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
                 items(conversationsList, key = { it.conversation.id }) { item ->
-                    ConversationItem(item, currentUserId, blueColor, whatsappGreen) { onConversationClick(item.conversation) }
+                    ConversationItem(
+                        item = item,
+                        currentUserId = currentUserId,
+                        blueColor = blueColor,
+                        badgeColor = whatsappGreen,
+                        onClick = { onConversationClick(item.conversation) },
+                        onLongClick = { togglePin(item) }
+                    )
                 }
             }
         }
     }
 }
-
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun ConversationItem(item: ChatItemUiState, currentUserId: String, blueColor: Color, badgeColor: Color, onClick: () -> Unit) {
+fun ConversationItem(item: ChatItemUiState, currentUserId: String, blueColor: Color, badgeColor: Color, onClick: () -> Unit, onLongClick: () -> Unit) {
 
     fun formatTimeDisplay(rawTime: String?): String {
         if (rawTime.isNullOrEmpty()) return ""
@@ -252,7 +290,13 @@ fun ConversationItem(item: ChatItemUiState, currentUserId: String, blueColor: Co
     }
 
     Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onClick() },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .combinedClickable(
+                onClick = { onClick() },
+                onLongClick = { onLongClick() }
+            ),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(2.dp)
@@ -263,18 +307,33 @@ fun ConversationItem(item: ChatItemUiState, currentUserId: String, blueColor: Co
             }
             Spacer(modifier = Modifier.width(16.dp))
 
+            // ... dentro da Row do ConversationItem ( Ajuda LLM GEMINI 1.5 )
             Column(modifier = Modifier.weight(1f)) {
                 Text(item.contactName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.Black)
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Ícone de status (Enviada/Lida) - APENAS SE FOR MINHA
                     if (item.conversation.last_message_sender_id == currentUserId) {
                         val icon = if (item.conversation.last_message_status == "enviada") Icons.Default.Check else Icons.Default.DoneAll
                         val iconTint = if (item.conversation.last_message_status == "lida") Color(0xFF4CAF50) else Color(0xFF9E9E9E)
                         Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = iconTint)
                         Spacer(modifier = Modifier.width(4.dp))
                     }
+
+                    // ALFINETE - FORA DO IF (Para aparecer sempre que estiver fixado)
+                    if (item.conversation.is_pinned) {
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp).rotate(45f),
+                            tint = blueColor // Mudei para azul para destacar mais que o cinza
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+
                     Text(item.conversation.last_message ?: "Inicie a conversa", maxLines = 1, fontSize = 14.sp, color = Color.DarkGray)
                 }
             }
+            // ... Fim LLM Gemini
 
             Column(horizontalAlignment = Alignment.End) {
                 if (item.conversation.last_message_time != null) {
