@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.resenha.data.AuthViewModel
+import com.example.resenha.data.Conversation
 import com.example.resenha.network.SupabaseClient
 import com.example.resenha.ui.auth.LoginScreen
 import com.example.resenha.ui.auth.SignUpScreen
@@ -73,17 +74,44 @@ class MainActivity : ComponentActivity() {
                                 try {
                                     val myId = SupabaseClient.client.auth.currentUserOrNull()?.id
                                     if (myId != null) {
-                                        SupabaseClient.client.from("conversations").insert(
-                                            mapOf(
-                                                "user_1" to myId,
-                                                "user_2" to selectedUser.id,
-                                                "last_message" to "Iniciou uma resenha"
-                                            )
-                                        )
-                                        currentScreen = "home"
+
+                                        // 1. Verifica se já existe uma conversa com essa pessoa
+                                        val existingConvs = SupabaseClient.client.from("conversations")
+                                            .select()
+                                            .decodeList<Conversation>()
+
+                                        val existingChat = existingConvs.find {
+                                            (it.user_1 == myId && it.user_2 == selectedUser.id) ||
+                                                    (it.user_1 == selectedUser.id && it.user_2 == myId)
+                                        }
+
+                                        if (existingChat != null) {
+                                            // Já existe! Abre a conversa direta
+                                            activeConversationId = existingChat.id
+                                            currentScreen = "chat"
+                                        } else {
+                                            // 2. Não existe. Cria uma nova e pega o ID retornado
+                                            val newChats = SupabaseClient.client.from("conversations").insert(
+                                                mapOf(
+                                                    "user_1" to myId,
+                                                    "user_2" to selectedUser.id,
+                                                    "last_message" to CryptoUtils.encrypt("Iniciou uma resenha")
+                                                )
+                                            ) {
+                                                select() // Exige que o Supabase devolva a linha recém-criada
+                                            }.decodeList<Conversation>()
+
+                                            // 3. Joga o usuário direto para a tela de Chat
+                                            if (newChats.isNotEmpty()) {
+                                                activeConversationId = newChats.first().id
+                                                currentScreen = "chat"
+                                            } else {
+                                                currentScreen = "home"
+                                            }
+                                        }
                                     }
                                 } catch (e: Exception) {
-                                    currentScreen = "home"
+                                    currentScreen = "home" // Se algo falhar, volta para a home em segurança
                                 }
                             }
                         }

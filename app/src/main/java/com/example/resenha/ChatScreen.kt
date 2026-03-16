@@ -11,7 +11,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -22,6 +32,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
@@ -32,8 +43,30 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,7 +82,9 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
+import com.example.resenha.data.ChatMessage
 import com.example.resenha.data.Conversation
+import com.example.resenha.data.UserProfile
 import com.example.resenha.network.SupabaseClient
 import com.google.android.gms.location.LocationServices
 import io.github.jan.supabase.auth.auth
@@ -60,7 +95,6 @@ import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.InternalSerializationApi
 import java.io.File
 import java.text.SimpleDateFormat
@@ -68,19 +102,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
-
-@OptIn(InternalSerializationApi::class)
-@Serializable
-data class ChatMessage(
-    val id: String,
-    val conversation_id: String,
-    val sender_id: String,
-    val content: String,
-    val created_at: String,
-    val status: String = "enviada",
-    val media_url: String? = null,
-    val media_type: String? = null
-)
 
 @OptIn(ExperimentalMaterial3Api::class, InternalSerializationApi::class)
 @Composable
@@ -92,7 +113,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var contactName by remember { mutableStateOf("Carregando...") }
 
-    // CORREÇÃO AQUI: "remember" guarda o ID na memória para não o perdermos ao abrir a galeria/câmera
     val currentUserId = remember { SupabaseClient.client.auth.currentUserOrNull()?.id ?: "" }
 
     val context = LocalContext.current
@@ -100,6 +120,8 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
     var isUploading by remember { mutableStateOf(false) }
     var expandedImageUrl by remember { mutableStateOf<String?>(null) }
     var showAttachmentMenu by remember { mutableStateOf(false) }
+
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
 
@@ -137,7 +159,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 val msgs = SupabaseClient.client.from("messages")
                     .select { filter { eq("conversation_id", conversationId) } }.decodeList<ChatMessage>()
 
-                messages = msgs.sortedBy { it.created_at }
+                messages = msgs.map { it.copy(content = CryptoUtils.decrypt(it.content)) }.sortedBy { it.created_at }
 
                 val mensagensNaoLidas = msgs.filter { it.sender_id != currentUserId && it.status != "lida" }
                 if (mensagensNaoLidas.isNotEmpty()) {
@@ -175,11 +197,13 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         timeFormat.timeZone = TimeZone.getTimeZone("UTC")
                         val currentTime = timeFormat.format(Date())
 
+                        val contentStr = "📷 Imagem da Câmera"
+
                         SupabaseClient.client.from("messages").insert(
                             mapOf(
                                 "conversation_id" to conversationId,
                                 "sender_id" to currentUserId,
-                                "content" to "📷 Imagem da Câmera",
+                                "content" to CryptoUtils.encrypt(contentStr),
                                 "status" to "enviada",
                                 "media_url" to publicUrl,
                                 "media_type" to "image"
@@ -187,7 +211,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         )
                         SupabaseClient.client.from("conversations").update(
                             {
-                                set("last_message", "📷 Imagem da Câmera")
+                                set("last_message", CryptoUtils.encrypt(contentStr))
                                 set("last_message_sender_id", currentUserId)
                                 set("last_message_status", "enviada")
                                 set("last_message_time", currentTime)
@@ -251,11 +275,13 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     timeFormat.timeZone = TimeZone.getTimeZone("UTC")
                     val currentTime = timeFormat.format(Date())
 
+                    val contentStr = "🎤 Mensagem de Voz"
+
                     SupabaseClient.client.from("messages").insert(
                         mapOf(
                             "conversation_id" to conversationId,
                             "sender_id" to currentUserId,
-                            "content" to "🎤 Mensagem de Voz",
+                            "content" to CryptoUtils.encrypt(contentStr),
                             "status" to "enviada",
                             "media_url" to publicUrl,
                             "media_type" to "audio"
@@ -263,7 +289,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     )
                     SupabaseClient.client.from("conversations").update(
                         {
-                            set("last_message", "🎤 Mensagem de Voz")
+                            set("last_message", CryptoUtils.encrypt(contentStr))
                             set("last_message_sender_id", currentUserId)
                             set("last_message_status", "enviada")
                             set("last_message_time", currentTime)
@@ -317,11 +343,13 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 timeFormat.timeZone = TimeZone.getTimeZone("UTC")
                 val currentTime = timeFormat.format(Date())
 
+                val contentStr = "📍 Localização Atual"
+
                 SupabaseClient.client.from("messages").insert(
                     mapOf(
                         "conversation_id" to conversationId,
                         "sender_id" to currentUserId,
-                        "content" to "📍 Localização Atual",
+                        "content" to CryptoUtils.encrypt(contentStr),
                         "status" to "enviada",
                         "media_url" to mapsLink,
                         "media_type" to "location"
@@ -329,7 +357,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 )
                 SupabaseClient.client.from("conversations").update(
                     {
-                        set("last_message", "📍 Localização")
+                        set("last_message", CryptoUtils.encrypt(contentStr))
                         set("last_message_sender_id", currentUserId)
                         set("last_message_status", "enviada")
                         set("last_message_time", currentTime)
@@ -429,7 +457,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                             mapOf(
                                 "conversation_id" to conversationId,
                                 "sender_id" to currentUserId,
-                                "content" to contentStr,
+                                "content" to CryptoUtils.encrypt(contentStr),
                                 "status" to "enviada",
                                 "media_url" to publicUrl,
                                 "media_type" to typeStr
@@ -437,7 +465,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         )
                         SupabaseClient.client.from("conversations").update(
                             {
-                                set("last_message", contentStr)
+                                set("last_message", CryptoUtils.encrypt(contentStr))
                                 set("last_message_sender_id", currentUserId)
                                 set("last_message_status", "enviada")
                                 set("last_message_time", currentTime)
@@ -491,12 +519,92 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         }
     }
 
+    // --- CAIXA DE DIÁLOGO DE EXCLUSÃO (AGORA COM LIMPEZA PROFUNDA SEGURA) ---
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = {
+                Text(
+                    text = "Eliminar Resenha",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black
+                )
+            },
+            text = {
+                Text(
+                    text = "Tem a certeza que deseja apagar esta conversa para sempre? Todas as mensagens e os seus ficheiros de multimédia serão eliminados.",
+                    color = Color.DarkGray
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteDialog = false
+                    isUploading = true
+
+                    scope.launch {
+                        try {
+                            // 1. Procurar as fotos/áudios que VOCÊ enviou
+                            val myMediaMsgs = SupabaseClient.client.from("messages")
+                                .select {
+                                    filter {
+                                        eq("conversation_id", conversationId)
+                                        eq("sender_id", currentUserId)
+                                    }
+                                }
+                                .decodeList<ChatMessage>()
+
+                            val mediaUrls = myMediaMsgs.mapNotNull { it.media_url }
+                                .filter { it.contains("supabase.co/storage/v1/object/public/resenha/") }
+
+                            // 2. Apagar os ficheiros de multimédia de uma só vez (Lista)
+                            if (mediaUrls.isNotEmpty()) {
+                                val fileNames = mediaUrls.map { it.substringAfterLast("/") }
+                                try {
+                                    SupabaseClient.client.storage.from("resenha").delete(fileNames)
+                                } catch (e: Exception) {
+                                    // Ignorar se o ficheiro já não estiver lá
+                                }
+                            }
+
+                            // 3. Plano B: Apagar mensagens manualmente para evitar falhas do Cascade
+                            try {
+                                SupabaseClient.client.from("messages").delete {
+                                    filter { eq("conversation_id", conversationId) }
+                                }
+                            } catch (e: Exception) {}
+
+                            // 4. Apagar a conversa
+                            SupabaseClient.client.from("conversations").delete {
+                                filter { eq("id", conversationId) }
+                            }
+
+                            isUploading = false
+                            onBack() // Volta ao ecrã inicial
+                        } catch (e: Exception) {
+                            isUploading = false
+                            errorMessage = "Erro RLS: Verifique as Policies no Supabase! ${e.message}"
+                        }
+                    }
+                }) { Text("Eliminar Tudo", color = Color.Red, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancelar", color = Color.Black) }
+            },
+            containerColor = Color.White
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(contactName, fontWeight = FontWeight.Bold, color = Color.Black) },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.Black) }
+                },
+                actions = {
+                    IconButton(onClick = { showDeleteDialog = true }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Excluir Conversa", tint = Color.Red)
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
             )
@@ -907,7 +1015,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                             mapOf(
                                                 "conversation_id" to conversationId,
                                                 "sender_id" to currentUserId,
-                                                "content" to contentToSave,
+                                                "content" to CryptoUtils.encrypt(contentToSave),
                                                 "status" to "enviada",
                                                 "media_url" to mediaUrlToSave,
                                                 "media_type" to mediaTypeToSave
@@ -915,7 +1023,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                         )
                                         SupabaseClient.client.from("conversations").update(
                                             {
-                                                set("last_message", contentToSave)
+                                                set("last_message", CryptoUtils.encrypt(contentToSave))
                                                 set("last_message_sender_id", currentUserId)
                                                 set("last_message_status", "enviada")
                                                 set("last_message_time", currentTime)

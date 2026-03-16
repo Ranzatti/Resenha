@@ -2,9 +2,19 @@ package com.example.resenha
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
-import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -15,8 +25,25 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -24,7 +51,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.resenha.data.ChatItemUiState
 import com.example.resenha.data.Conversation
+import com.example.resenha.data.MessageBadge
+import com.example.resenha.data.UserProfile
 import com.example.resenha.network.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
@@ -33,25 +63,8 @@ import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.InternalSerializationApi
 
-@Serializable
-data class MessageBadge(
-    val id: String,
-    val conversation_id: String,
-    val sender_id: String,
-    val content: String? = null,
-    val created_at: String? = null,
-    val status: String = "enviada",
-    val is_pinned: Boolean = false
-)
-
-data class ChatItemUiState(
-    val conversation: Conversation,
-    val contactName: String,
-    val unreadCount: Int
-)
 
 @OptIn(ExperimentalMaterial3Api::class, InternalSerializationApi::class)
 @Composable
@@ -94,10 +107,13 @@ fun HomeScreen(
     fun loadConversations() {
         scope.launch {
             try {
-                val result = SupabaseClient.client.from("conversations").select().decodeList<Conversation>()
-                val myConversations = result.filter { it.user_1 == currentUserId || it.user_2 == currentUserId }
+                val result =
+                    SupabaseClient.client.from("conversations").select().decodeList<Conversation>()
+                val myConversations =
+                    result.filter { it.user_1 == currentUserId || it.user_2 == currentUserId }
 
-                val profiles = SupabaseClient.client.from("users").select().decodeList<UserProfile>()
+                val profiles =
+                    SupabaseClient.client.from("users").select().decodeList<UserProfile>()
                 val usersMap = profiles.associateBy { it.id }
 
                 val unreadMsgs = SupabaseClient.client.from("messages")
@@ -108,15 +124,17 @@ fun HomeScreen(
                         }
                     }.decodeList<MessageBadge>()
 
-                val unreadMap = unreadMsgs.groupBy { it.conversation_id }.mapValues { it.value.size }
+                val unreadMap =
+                    unreadMsgs.groupBy { it.conversation_id }.mapValues { it.value.size }
 
-                // --- LÓGICA CORRIGIDA: DISPARO DA NOTIFICAÇÃO ---
                 val totalUnreadNow = unreadMsgs.size
 
                 if (!isInitialLoad) {
                     if (totalUnreadNow > previousUnreadCount) {
                         val ultimaMsg = unreadMsgs.lastOrNull()
-                        val nomeRemetente = if (ultimaMsg != null) usersMap[ultimaMsg.sender_id]?.name ?: "Novo usuário" else "Resenha"
+                        val nomeRemetente =
+                            if (ultimaMsg != null) usersMap[ultimaMsg.sender_id]?.name
+                                ?: "Novo usuário" else "Resenha"
 
                         NotificationHelper.showNotification(
                             context = context,
@@ -129,7 +147,6 @@ fun HomeScreen(
                 }
 
                 previousUnreadCount = totalUnreadNow
-                // ---------------------------------------------------
 
                 val mappedList = myConversations.map { conv ->
                     val otherUserId = if (conv.user_1 == currentUserId) conv.user_2 else conv.user_1
@@ -138,8 +155,7 @@ fun HomeScreen(
                     ChatItemUiState(conversation = conv, contactName = name, unreadCount = count)
                 }
 
-                //conversationsList = mappedList.sortedByDescending { it.unreadCount > 0 }
-                conversationsList = mappedList.sortedWith (
+                conversationsList = mappedList.sortedWith(
                     compareByDescending<ChatItemUiState> { it.conversation.is_pinned }
                         .thenByDescending { it.unreadCount > 0 }
                         .thenByDescending { it.conversation.last_message_time }
@@ -166,7 +182,8 @@ fun HomeScreen(
                                         eq("status", "enviada")
                                     }
                                 }
-                            } catch(e: Exception) {}
+                            } catch (e: Exception) {
+                            }
                         }
                     }
                 }
@@ -179,7 +196,7 @@ fun HomeScreen(
 
 
     fun togglePin(item: ChatItemUiState) {
-        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress) // VIBRAÇÃO
+        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
         scope.launch {
             try {
                 SupabaseClient.client.from("conversations").update(
@@ -189,7 +206,6 @@ fun HomeScreen(
                 ) {
                     filter { eq("id", item.conversation.id) }
                 }
-                // Recarrega a lista para ordenar novamente
                 loadConversations()
             } catch (e: Exception) {
                 println("Erro ao fixar: ${e.message}")
@@ -210,7 +226,8 @@ fun HomeScreen(
                     changeFlow.collect { loadConversations() }
                 }
                 channel.subscribe()
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+            }
         }
 
         scope.launch {
@@ -224,15 +241,31 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Resenhas Ativas", fontWeight = FontWeight.Bold, color = Color.Black) },
+                title = {
+                    Text(
+                        "Resenhas Ativas",
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black
+                    )
+                },
                 actions = {
-                    IconButton(onClick = onLogoutClick) { Icon(Icons.Default.ExitToApp, null, tint = Color.Black) }
+                    IconButton(onClick = onLogoutClick) {
+                        Icon(
+                            Icons.Default.ExitToApp,
+                            null,
+                            tint = Color.Black
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onNewChatClick, containerColor = blueColor, contentColor = Color.White) {
+            FloatingActionButton(
+                onClick = onNewChatClick,
+                containerColor = blueColor,
+                contentColor = Color.White
+            ) {
                 Icon(Icons.Default.Add, null)
             }
         },
@@ -243,15 +276,25 @@ fun HomeScreen(
                 CircularProgressIndicator(color = blueColor)
             }
         } else if (conversationsList.isEmpty()) {
-            Column(modifier = Modifier.fillMaxSize().padding(padding), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
                 Icon(Icons.Default.Forum, null, modifier = Modifier.size(64.dp), tint = Color.Gray)
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("Nenhuma resenha ainda.", color = Color.Black, fontWeight = FontWeight.Medium)
                 Text("Toque no + para buscar pessoas!", color = Color.DarkGray)
             }
         } else {
-            // No final da HomeScreen
-            LazyColumn(modifier = Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+            LazyColumn(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize(),
+                contentPadding = PaddingValues(16.dp)
+            ) {
                 items(conversationsList, key = { it.conversation.id }) { item ->
                     ConversationItem(
                         item = item,
@@ -266,16 +309,25 @@ fun HomeScreen(
         }
     }
 }
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun ConversationItem(item: ChatItemUiState, currentUserId: String, blueColor: Color, badgeColor: Color, onClick: () -> Unit, onLongClick: () -> Unit) {
+fun ConversationItem(
+    item: ChatItemUiState,
+    currentUserId: String,
+    blueColor: Color,
+    badgeColor: Color,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
 
     fun formatTimeDisplay(rawTime: String?): String {
         if (rawTime.isNullOrEmpty()) return ""
         if (rawTime.length <= 5) return rawTime
 
         return try {
-            val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
+            val parser =
+                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
             parser.timeZone = java.util.TimeZone.getTimeZone("UTC")
 
             val cleanTime = rawTime.substringBefore(".").substringBefore("+").substringBefore("Z")
@@ -302,38 +354,66 @@ fun ConversationItem(item: ChatItemUiState, currentUserId: String, blueColor: Co
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(50.dp).background(blueColor, CircleShape), contentAlignment = Alignment.Center) {
-                Text(item.contactName.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold)
+            Box(
+                modifier = Modifier
+                    .size(50.dp)
+                    .background(blueColor, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    item.contactName.take(1).uppercase(),
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
             }
             Spacer(modifier = Modifier.width(16.dp))
 
-            // ... dentro da Row do ConversationItem ( Ajuda LLM GEMINI 1.5 )
             Column(modifier = Modifier.weight(1f)) {
-                Text(item.contactName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.Black)
+                Text(
+                    item.contactName,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = Color.Black
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Ícone de status (Enviada/Lida) - APENAS SE FOR MINHA
                     if (item.conversation.last_message_sender_id == currentUserId) {
-                        val icon = if (item.conversation.last_message_status == "enviada") Icons.Default.Check else Icons.Default.DoneAll
-                        val iconTint = if (item.conversation.last_message_status == "lida") Color(0xFF4CAF50) else Color(0xFF9E9E9E)
-                        Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = iconTint)
-                        Spacer(modifier = Modifier.width(4.dp))
-                    }
-
-                    // ALFINETE - FORA DO IF (Para aparecer sempre que estiver fixado)
-                    if (item.conversation.is_pinned) {
+                        val icon =
+                            if (item.conversation.last_message_status == "enviada") Icons.Default.Check else Icons.Default.DoneAll
+                        val iconTint =
+                            if (item.conversation.last_message_status == "lida") Color(0xFF4CAF50) else Color(
+                                0xFF9E9E9E
+                            )
                         Icon(
-                            imageVector = Icons.Default.PushPin,
+                            imageVector = icon,
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp).rotate(45f),
-                            tint = blueColor // Mudei para azul para destacar mais que o cinza
+                            modifier = Modifier.size(16.dp),
+                            tint = iconTint
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                     }
 
-                    Text(item.conversation.last_message ?: "Inicie a conversa", maxLines = 1, fontSize = 14.sp, color = Color.DarkGray)
+                    if (item.conversation.is_pinned) {
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .rotate(45f),
+                            tint = blueColor
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+
+                    // AQUI APLICAMOS A CRIPTOGRAFIA NA TELA INICIAL
+                    val previewMessage = if (item.conversation.last_message.isNullOrEmpty()) {
+                        "Inicie a conversa"
+                    } else {
+                        CryptoUtils.decrypt(item.conversation.last_message)
+                    }
+
+                    Text(previewMessage, maxLines = 1, fontSize = 14.sp, color = Color.DarkGray)
                 }
             }
-            // ... Fim LLM Gemini
 
             Column(horizontalAlignment = Alignment.End) {
                 if (item.conversation.last_message_time != null) {
@@ -348,7 +428,9 @@ fun ConversationItem(item: ChatItemUiState, currentUserId: String, blueColor: Co
                 if (item.unreadCount > 0) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Box(
-                        modifier = Modifier.size(24.dp).background(badgeColor, CircleShape),
+                        modifier = Modifier
+                            .size(24.dp)
+                            .background(badgeColor, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
