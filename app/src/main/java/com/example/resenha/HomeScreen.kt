@@ -1,5 +1,6 @@
 package com.example.resenha
 
+import android.annotation.SuppressLint
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -14,16 +15,24 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.example.resenha.data.Conversation
 import com.example.resenha.network.SupabaseClient
+import com.example.resenha.ui.user.ProfileViewModel
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.realtime.PostgresAction
@@ -33,7 +42,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.InternalSerializationApi
+import com.example.resenha.data.UserProfile
+import coil.request.ImageRequest
+import com.example.resenha.data.ConversationParticipant
 
+@SuppressLint("UnsafeOptInUsageError")
 @Serializable
 data class MessageBadge(
     val id: String,
@@ -47,6 +60,7 @@ data class MessageBadge(
 data class ChatItemUiState(
     val conversation: Conversation,
     val contactName: String,
+    val contactImageUrl: String?,
     val unreadCount: Int
 )
 
@@ -55,7 +69,9 @@ data class ChatItemUiState(
 fun HomeScreen(
     onConversationClick: (Conversation) -> Unit,
     onNewChatClick: () -> Unit,
-    onLogoutClick: () -> Unit
+    onNewGroupClick: () -> Unit, // cria o grupo
+    onLogoutClick: () -> Unit,
+    onProfileClick: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val blueColor = Color(0xFF94ADFF)
@@ -73,6 +89,11 @@ fun HomeScreen(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
         onResult = { isGranted -> }
     )
+    //----
+    val profileViewModel: ProfileViewModel = viewModel()
+    var profileImageUrl by remember { mutableStateOf<String?>(null) }
+    var userName by remember { mutableStateOf("") }
+    //----
 
     LaunchedEffect(Unit) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -89,11 +110,39 @@ fun HomeScreen(
     fun loadConversations() {
         scope.launch {
             try {
-                val result = SupabaseClient.client.from("conversations").select().decodeList<Conversation>()
-                val myConversations = result.filter { it.user_1 == currentUserId || it.user_2 == currentUserId }
 
-                val profiles = SupabaseClient.client.from("users").select().decodeList<UserProfile>()
+                val profiles =
+                    SupabaseClient.client.from("users").select().decodeList<UserProfile>()
                 val usersMap = profiles.associateBy { it.id }
+
+                // -- alterado para receber os grupos - bruna
+
+                val myParticipations =
+                    SupabaseClient.client.from("conversation_participants")
+                    .select { filter { eq("user_id", currentUserId) } }
+                    .decodeList<ConversationParticipant>()
+                val myGroupIds = myParticipations.map { it.conversation_id }
+
+                val privateConvs = SupabaseClient.client.from("conversations")
+                    .select { filter {
+                        or {
+                            eq("user_1", currentUserId)
+                            eq("user_2", currentUserId)
+                        }
+                    }}.decodeList<Conversation>()
+
+                val groupConvs = if (myGroupIds.isNotEmpty()) {
+                    SupabaseClient.client.from("conversations")
+                        .select { filter { isIn("id", myGroupIds) } }
+                        .decodeList<Conversation>()
+                } else emptyList()
+
+                val myConversations = (privateConvs + groupConvs).distinctBy { it.id }
+
+
+
+
+                //----- fim bruna
 
                 val unreadMsgs = SupabaseClient.client.from("messages")
                     .select {
@@ -126,11 +175,32 @@ fun HomeScreen(
                 previousUnreadCount = totalUnreadNow
                 // ---------------------------------------------------
 
+                //--- novo mappedList
                 val mappedList = myConversations.map { conv ->
-                    val otherUserId = if (conv.user_1 == currentUserId) conv.user_2 else conv.user_1
-                    val name = usersMap[otherUserId]?.name ?: "Usuário"
+                    val displayContactName: String
+                    val displayImageUrl: String?
+
+                    if (conv.is_group) {
+                        displayContactName = conv.name ?: "Grupo Sem Nome"
+                        displayImageUrl = conv.group_image_url
+                    } else {
+                        //--
+                        val u1 = conv.user_1 ?: ""
+                        val u2 = conv.user_2 ?: ""
+                        //--
+                        //val otherUserId = if (conv.user_1 == currentUserId) conv.user_2 else conv.user_1
+                        val otherUserId = if (u1 == currentUserId) u2 else u1
+                        displayContactName = usersMap[otherUserId]?.name ?: "Usuário"
+                        displayImageUrl = usersMap[otherUserId]?.profile_image_url
+                    }
+                    //-----
+
                     val count = unreadMap[conv.id] ?: 0
-                    ChatItemUiState(conversation = conv, contactName = name, unreadCount = count)
+                    ChatItemUiState(
+                        conversation = conv,
+                        contactName = displayContactName,
+                        contactImageUrl = displayImageUrl,
+                        unreadCount = count)
                 }
 
                 conversationsList = mappedList.sortedByDescending { it.unreadCount > 0 }
@@ -160,7 +230,8 @@ fun HomeScreen(
                         }
                     }
                 }
-            } catch (e: Exception) {
+            } catch (e: Exception)
+            {android.util.Log.e("RESENHA_HOME", "Erro ao carregar conversas: ${e.message}", e)
             } finally {
                 isLoading = false
             }
@@ -190,10 +261,61 @@ fun HomeScreen(
             }
         }
     }
+    //-----
+    // Import essencial, garanta que ele esteja no topo do seu arquivo:
+// import com.example.resenha.data.UserProfile
+
+    LaunchedEffect(Unit) {
+        val userId = SupabaseClient.client.auth.currentUserOrNull()?.id
+        if (userId != null) {
+            try {
+                // Busca o usuário atualizado direto do banco
+                val user = SupabaseClient.client.from("users")
+                    .select { filter { eq("id", userId) } }
+                    .decodeSingle<UserProfile>() // OBRIGATÓRIO TER <UserProfile>
+
+                // Atualiza os estados
+                profileImageUrl = user.profile_image_url
+                userName = user.name
+
+                android.util.Log.d("RESENHA_DEBUG", "URL carregada na Home: ${user.profile_image_url}")
+            } catch (e: Exception) {
+                android.util.Log.e("RESENHA_DEBUG", "Erro ao buscar usuário na Home", e)
+            }
+        }
+    }
+ // --- bruna (criar um botão menu para a opção de ser uma nova conversa ou grupo)
+    var showFabMenu by remember { mutableStateOf(false)}
 
     Scaffold(
         topBar = {
             TopAppBar(
+                //-------
+                navigationIcon = {
+                    IconButton(
+                        onClick = onProfileClick,
+                        modifier = Modifier.padding(start = 8.dp)
+                    ) {
+                        // Garantir que não enviaremos nome vazio pra API de avatar
+                        val fallbackName = if (userName.isNotBlank()) userName else "User"
+                        val finalUrl = profileImageUrl ?: "https://ui-avatars.com/api/?name=$fallbackName&background=94ADFF&color=fff"
+
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current) // Usa o context local
+                                .data(finalUrl)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "Meu Perfil",
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color.LightGray),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                },
+                //--------
+
                 title = { Text("Resenhas Ativas", fontWeight = FontWeight.Bold, color = Color.Black) },
                 actions = {
                     IconButton(onClick = onLogoutClick) { Icon(Icons.Default.ExitToApp, null, tint = Color.Black) }
@@ -202,8 +324,43 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onNewChatClick, containerColor = blueColor, contentColor = Color.White) {
-                Icon(Icons.Default.Add, null)
+
+            Box {
+                FloatingActionButton(
+                    onClick = { showFabMenu = true }, // Ao clicar, abre o menu em vez de ir direto
+                    containerColor = blueColor,
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Nova Conversa")
+                }
+
+                // O Menu suspenso que aparece em cima do botão
+                DropdownMenu(
+                    expanded = showFabMenu,
+                    onDismissRequest = { showFabMenu = false },
+                    modifier = Modifier.background(Color.White)
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Novo Chat Privado", color = blueColor) },
+                        leadingIcon = {
+                            Icon(Icons.Filled.Person, contentDescription = null, tint = blueColor)
+                        },
+                        onClick = {
+                            showFabMenu = false
+                            onNewChatClick() // Chama a tela de busca antiga
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Novo Grupo", color = blueColor) },
+                        leadingIcon = {
+                            Icon(Icons.Filled.Group, contentDescription = null, tint = blueColor)
+                        },
+                        onClick = {
+                            showFabMenu = false
+                            onNewGroupClick() // Chama a nova tela de criação de grupos
+                        }
+                    )
+                }
             }
         },
         containerColor = Color(0xFFF5F7FF)
@@ -258,9 +415,21 @@ fun ConversationItem(item: ChatItemUiState, currentUserId: String, blueColor: Co
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(50.dp).background(blueColor, CircleShape), contentAlignment = Alignment.Center) {
-                Text(item.contactName.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold)
-            }
+
+            // --- Bruna
+            AsyncImage(
+                model = coil.request.ImageRequest.Builder(LocalContext.current)
+                    .data(item.contactImageUrl ?: "https://ui-avatars.com/api/?name=${item.contactName}&background=94ADFF&color=fff")
+                    .crossfade(true)
+                    .build(),
+                contentDescription = "Foto do contato",
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(CircleShape)
+                    .background(Color.LightGray),
+                contentScale = ContentScale.Crop
+            )
+            // ----
             Spacer(modifier = Modifier.width(16.dp))
 
             Column(modifier = Modifier.weight(1f)) {

@@ -5,6 +5,8 @@ import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.storage.Storage
+// novo
+import io.ktor.client.engine.okhttp.OkHttp
 
 object SupabaseClient {
 
@@ -15,6 +17,7 @@ object SupabaseClient {
         supabaseUrl = SUPABASE_URL,
         supabaseKey = SUPABASE_ANON_KEY
     ) {
+        httpEngine = OkHttp.create() // <-- Engine com suporte a WebSocket
         install(Auth)
         install(Postgrest)
         install(Storage)

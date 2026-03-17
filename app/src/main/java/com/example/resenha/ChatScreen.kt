@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -42,6 +44,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -68,6 +71,10 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
+import com.example.resenha.data.UserProfile
+import coil.request.ImageRequest
+import com.example.resenha.ui.group.GroupManagementScreen
+import com.example.resenha.data.ConversationParticipant
 
 @OptIn(InternalSerializationApi::class)
 @Serializable
@@ -102,6 +109,56 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
     var showAttachmentMenu by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
+
+    //----bruna
+    var contactImageUrl by remember { mutableStateOf<String?>(null) }
+    var showGroupManagement by remember { mutableStateOf(false) }
+    var isGroup by remember { mutableStateOf(false) }  // Carregue do conv.is_group
+    var members by remember { mutableStateOf(listOf<UserProfile>()) }
+
+    //------
+
+    //--- bruna mudando a inteface amigavel
+    // Função para agrupar as datas
+    fun formatHeaderDate(rawTime: String?): String {
+        if (rawTime.isNullOrEmpty()) return "Desconhecido"
+        return try {
+            val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+            parser.timeZone = TimeZone.getTimeZone("UTC")
+            val cleanTime = rawTime.substringBefore(".").substringBefore("+").substringBefore("Z")
+            val date = parser.parse(cleanTime) ?: return "Desconhecido"
+
+            val now = Date()
+            val fmtDay = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+
+            when (fmtDay.format(date)) {
+                fmtDay.format(now) -> "Hoje"
+                fmtDay.format(Date(now.time - 86400000)) -> "Ontem"
+                else -> SimpleDateFormat("dd 'de' MMMM", Locale("pt", "BR")).format(date)
+            }
+        } catch (e: Exception) {
+            "Data Inválida"
+        }
+    }
+
+    // Função para pegar a hora (Ex: "14:30")
+    fun formatMessageTime(rawTime: String?): String {
+        if (rawTime.isNullOrEmpty()) return ""
+        return try {
+            val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+            parser.timeZone = TimeZone.getTimeZone("UTC")
+            val cleanTime = rawTime.substringBefore(".").substringBefore("+").substringBefore("Z")
+            val date = parser.parse(cleanTime) ?: return ""
+
+            val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
+            formatter.timeZone = TimeZone.getDefault()
+            formatter.format(date)
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    //------
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -459,19 +516,55 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         recarregarMensagens()
 
         scope.launch {
-            try {
-                val convs = SupabaseClient.client.from("conversations")
-                    .select { filter { eq("id", conversationId) } }.decodeList<Conversation>()
-                val conv = convs.firstOrNull()
+            repeat(10) { attempt ->
+                try {
+                    android.util.Log.d("CHAT_SCREEN", "Tentativa ${attempt + 1}/10 para ID: $conversationId")
 
-                if (conv != null) {
-                    val otherId = if (conv.user_1 == currentUserId) conv.user_2 else conv.user_1
-                    val otherUsers = SupabaseClient.client.from("users")
-                        .select { filter { eq("id", otherId) } }.decodeList<UserProfile>()
-                    contactName = otherUsers.firstOrNull()?.name ?: "Resenha"
+                    val convs = SupabaseClient.client.from("conversations")
+                        .select { filter { eq("id", conversationId) } }
+                        .decodeList<Conversation>()
+
+                    android.util.Log.d("CHAT_SCREEN", "Encontradas ${convs.size} conversas")
+
+                    val conv = convs.firstOrNull()
+                    if (conv != null) {
+                        // se der ruim tirar
+                        isGroup = conv.is_group
+                        //
+                        android.util.Log.d("CHAT_SCREEN", "Conversa encontrada: ${conv.name} (is_group=${conv.is_group})")
+
+                        if (conv.is_group) {
+                            contactName = conv.name ?: "Grupo Sem Nome"
+                            contactImageUrl = conv.group_image_url
+                        } else {
+                            val u1 = conv.user_1 ?: ""
+                            val u2 = conv.user_2 ?: ""
+                            val otherId = if (u1 == currentUserId) u2 else u1
+
+                            if (otherId.isNotEmpty()) {
+                                val otherUsers = SupabaseClient.client.from("users")
+                                    .select { filter { eq("id", otherId) } }
+                                    .decodeList<UserProfile>()
+
+                                val otherUser = otherUsers.firstOrNull()
+                                contactName = otherUser?.name ?: "Resenha"
+                                contactImageUrl = otherUser?.profile_image_url
+                            }
+                        }
+                        return@launch  // ✅ SAI DO LOOP
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("CHAT_SCREEN", "Tentativa ${attempt + 1} falhou: ${e.message}")
                 }
-            } catch (e: Exception) { }
+
+                contactName = "Carregando... (${attempt + 1}/10)"
+                kotlinx.coroutines.delay(800)  // 0.8s entre tentativas
+            }
+
+            android.util.Log.e("CHAT_SCREEN", "❌ Falhou após 10 tentativas para $conversationId")
+            contactName = "Erro: conversa não encontrada"
         }
+
 
         scope.launch {
             try {
@@ -480,7 +573,9 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
 
                 launch { changeFlow.collect { recarregarMensagens() } }
                 channel.subscribe()
-            } catch (e: Exception) { }
+            } catch (e: Exception) {
+                android.util.Log.e("CHAT_REALTIME", "Erro realtime: ${e.message}", e)
+            }
         }
 
         scope.launch {
@@ -491,10 +586,67 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         }
     }
 
+    //----bruna colocou um lauched para gerenciar os pariticipantes do grupo
+    LaunchedEffect(conversationId, isGroup) {
+        if (isGroup) {
+            scope.launch {
+                val participants = SupabaseClient.client.from("conversation_participants")
+                    .select { filter { eq("conversation_id", conversationId) } }
+                    .decodeList<ConversationParticipant>()
+
+                members = participants.mapNotNull { participant ->
+                    try {
+                        SupabaseClient.client.from("users")
+                            .select { filter { eq("id", participant.user_id) } }
+                            .decodeSingle<UserProfile>()
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                android.util.Log.d("CHAT_MEMBERS", "Carregados ${members.size} membros")
+            }
+        }
+    }
+//----- fim
+
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(contactName, fontWeight = FontWeight.Bold, color = Color.Black) },
+                title = {
+                    //--- mostrar a foto na topbar
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AsyncImage(
+                            model = coil.request.ImageRequest.Builder(LocalContext.current)
+                                .data(contactImageUrl ?: "https://ui-avatars.com/api/?name=$contactName&background=94ADFF&color=fff")
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = null,
+                            modifier = Modifier.size(36.dp).clip(CircleShape).background(Color.LightGray),
+                            contentScale = ContentScale.Crop
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        contactName,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black)
+                      //implementando o gerenciador de grupo
+                        if (isGroup) {  // Você define isso carregando conv.is_group
+                            Spacer(Modifier.width(8.dp))
+                            IconButton(
+                                onClick = { showGroupManagement = true },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Settings,  // ou Icons.Default.Settings
+                                    contentDescription = "Gerenciar grupo",
+                                    tint = Color.Black
+                                )
+                            }
+                        }
+                        //---fim
+                    }
+                        },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.Black) }
                 },
@@ -503,178 +655,255 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         },
         containerColor = Color(0xFFF5F7FF)
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+        Column(modifier = Modifier
+            .padding(padding)
+            .fillMaxSize()) {
+            //---- bruna
+            val groupedMessages = messages.groupBy { formatHeaderDate(it.created_at) }
+
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
-                reverseLayout = true
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 16.dp),
+                reverseLayout = true // Começa de baixo (mensagens mais recentes)
             ) {
-                items(messages.reversed(), key = { it.id }) { msg ->
-                    val isMine = msg.sender_id == currentUserId
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start
-                    ) {
-                        Box(
-                            modifier = Modifier.background(
-                                color = if (isMine) blueColor else Color.White,
-                                shape = RoundedCornerShape(12.dp)
-                            ).padding(12.dp)
-                        ) {
-                            Column(horizontalAlignment = if (isMine) Alignment.End else Alignment.Start) {
+                // Itera sobre as datas de forma invertida para o reverseLayout funcionar
+                groupedMessages.entries.reversed().forEach { (dateHeader, msgsForDate) ->
 
-                                if (msg.media_url != null) {
-                                    if (msg.media_type == "pdf") {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier
-                                                .fillMaxWidth(0.8f)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color.Black.copy(alpha = 0.1f))
-                                                .clickable { uriHandler.openUri(msg.media_url) }
-                                                .padding(12.dp)
-                                        ) {
-                                            Text("📄", fontSize = 28.sp)
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                text = "Documento PDF\nToque para abrir",
-                                                color = if (isMine) Color.White else Color.Black,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                    } else if (msg.media_type == "video") {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier
-                                                .fillMaxWidth(0.8f)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color.Black.copy(alpha = 0.1f))
-                                                .clickable { uriHandler.openUri(msg.media_url) }
-                                                .padding(12.dp)
-                                        ) {
-                                            Text("🎥", fontSize = 28.sp)
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                text = "Vídeo\nToque para reproduzir",
-                                                color = if (isMine) Color.White else Color.Black,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                    } else if (msg.media_type == "location") {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier
-                                                .fillMaxWidth(0.8f)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color.Black.copy(alpha = 0.1f))
-                                                .clickable { uriHandler.openUri(msg.media_url) }
-                                                .padding(12.dp)
-                                        ) {
-                                            Text("📍", fontSize = 28.sp)
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                text = "Localização Atual\nToque para abrir no mapa",
-                                                color = if (isMine) Color.White else Color.Black,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                    } else if (msg.media_type == "audio") {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier
-                                                .fillMaxWidth(0.6f)
-                                                .clip(RoundedCornerShape(24.dp))
-                                                .background(if (isMine) Color.White.copy(alpha = 0.2f) else blueColor.copy(alpha = 0.1f))
-                                                .padding(4.dp)
-                                        ) {
-                                            val isPlaying = currentlyPlayingId == msg.id
-                                            IconButton(onClick = {
-                                                if (isPlaying) {
-                                                    mediaPlayer.pause()
-                                                    currentlyPlayingId = null
-                                                } else {
-                                                    try {
-                                                        mediaPlayer.reset()
-                                                        mediaPlayer.setOnErrorListener { _, _, _ ->
-                                                            errorMessage = "Formato não suportado."
-                                                            currentlyPlayingId = null
-                                                            true
-                                                        }
-                                                        mediaPlayer.setDataSource(msg.media_url)
-                                                        mediaPlayer.prepareAsync()
-                                                        mediaPlayer.setOnPreparedListener {
-                                                            it.start()
-                                                            currentlyPlayingId = msg.id
-                                                        }
-                                                        mediaPlayer.setOnCompletionListener {
-                                                            currentlyPlayingId = null
-                                                        }
-                                                    } catch (e: Exception) {
-                                                        errorMessage = "Erro ao iniciar o áudio: ${e.message}"
-                                                    }
-                                                }
-                                            }) {
-                                                Icon(
-                                                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                    contentDescription = "Play",
-                                                    tint = if (isMine) Color.White else blueColor
+                    // As mensagens do dia
+                    items(msgsForDate.reversed(), key = { it.id }) { msg ->
+                        val isMine = msg.sender_id == currentUserId
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
+                            verticalAlignment = Alignment.Bottom // Alinha a bolha com a base do avatar
+                        ) {
+                            // AVATAR DO CONTATO (só mostra se a mensagem não for sua)
+                            if (!isMine) {
+                                AsyncImage(
+                                    model = coil.request.ImageRequest.Builder(LocalContext.current)
+                                        .data(contactImageUrl ?: "https://ui-avatars.com/api/?name=$contactName&background=94ADFF&color=fff")
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = "Avatar",
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.LightGray),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+
+                            // BOLHA DA MENSAGEM
+                            Box(
+                                modifier = Modifier
+                                    .widthIn(max = 280.dp) // Limita a largura máxima da bolha
+                                    .background(
+                                        color = if (isMine) blueColor else Color.White,
+                                        shape = RoundedCornerShape(
+                                            topStart = 16.dp,
+                                            topEnd = 16.dp,
+                                            bottomStart = if (isMine) 16.dp else 4.dp, // Ponta da bolha para o contato
+                                            bottomEnd = if (isMine) 4.dp else 16.dp    // Ponta da bolha para você
+                                        )
+                                    )
+                                    .padding(12.dp)
+                            ) {
+                                Column(horizontalAlignment = if (isMine) Alignment.End else Alignment.Start) {
+
+                                    // AQUI VAI O CÓDIGO DA MÍDIA (Áudio, Vídeo, Imagem)
+                                    // (Mantenha os blocos if (msg.media_url != null) que você já tem no código original aqui dentro)
+                                    if (msg.media_url != null) {
+                                        if (msg.media_type == "pdf") {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .fillMaxWidth(0.8f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color.Black.copy(alpha = 0.1f))
+                                                    .clickable { uriHandler.openUri(msg.media_url) }
+                                                    .padding(12.dp)
+                                            ) {
+                                                Text("📄", fontSize = 28.sp)
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = "Documento PDF\nToque para abrir",
+                                                    color = if (isMine) Color.White else Color.Black,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    modifier = Modifier.weight(1f)
                                                 )
                                             }
-                                            Text(
-                                                text = if (isPlaying) "A reproduzir..." else "Áudio",
-                                                color = if (isMine) Color.White else Color.Black,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Medium
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                        } else if (msg.media_type == "video") {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .fillMaxWidth(0.8f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color.Black.copy(alpha = 0.1f))
+                                                    .clickable { uriHandler.openUri(msg.media_url) }
+                                                    .padding(12.dp)
+                                            ) {
+                                                Text("🎥", fontSize = 28.sp)
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = "Vídeo\nToque para reproduzir",
+                                                    color = if (isMine) Color.White else Color.Black,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                        } else if (msg.media_type == "location") {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .fillMaxWidth(0.8f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color.Black.copy(alpha = 0.1f))
+                                                    .clickable { uriHandler.openUri(msg.media_url) }
+                                                    .padding(12.dp)
+                                            ) {
+                                                Text("📍", fontSize = 28.sp)
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = "Localização Atual\nToque para abrir no mapa",
+                                                    color = if (isMine) Color.White else Color.Black,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                        } else if (msg.media_type == "audio") {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .fillMaxWidth(0.6f)
+                                                    .clip(RoundedCornerShape(24.dp))
+                                                    .background(if (isMine) Color.White.copy(alpha = 0.2f) else blueColor.copy(alpha = 0.1f))
+                                                    .padding(4.dp)
+                                            ) {
+                                                val isPlaying = currentlyPlayingId == msg.id
+                                                IconButton(onClick = {
+                                                    if (isPlaying) {
+                                                        mediaPlayer.pause()
+                                                        currentlyPlayingId = null
+                                                    } else {
+                                                        try {
+                                                            mediaPlayer.reset()
+                                                            mediaPlayer.setOnErrorListener { _, _, _ ->
+                                                                errorMessage = "Formato não suportado."
+                                                                currentlyPlayingId = null
+                                                                true
+                                                            }
+                                                            mediaPlayer.setDataSource(msg.media_url)
+                                                            mediaPlayer.prepareAsync()
+                                                            mediaPlayer.setOnPreparedListener {
+                                                                it.start()
+                                                                currentlyPlayingId = msg.id
+                                                            }
+                                                            mediaPlayer.setOnCompletionListener {
+                                                                currentlyPlayingId = null
+                                                            }
+                                                        } catch (e: Exception) {
+                                                            errorMessage = "Erro ao iniciar o áudio: ${e.message}"
+                                                        }
+                                                    }
+                                                }) {
+                                                    Icon(
+                                                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                        contentDescription = "Play",
+                                                        tint = if (isMine) Color.White else blueColor
+                                                    )
+                                                }
+                                                Text(
+                                                    text = if (isPlaying) "A reproduzir..." else "Áudio",
+                                                    color = if (isMine) Color.White else Color.Black,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                        } else {
+                                            AsyncImage(
+                                                model = msg.media_url,
+                                                contentDescription = "Imagem anexada",
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .fillMaxWidth(0.7f)
+                                                    .height(200.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .clickable { expandedImageUrl = msg.media_url }
+                                                    .padding(bottom = 8.dp)
                                             )
                                         }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                    } else {
-                                        AsyncImage(
-                                            model = msg.media_url,
-                                            contentDescription = "Imagem anexada",
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier
-                                                .fillMaxWidth(0.7f)
-                                                .height(200.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable { expandedImageUrl = msg.media_url }
-                                                .padding(bottom = 8.dp)
-                                        )
                                     }
-                                }
-
-                                Row(verticalAlignment = Alignment.Bottom) {
-                                    Text(
-                                        text = msg.content,
-                                        color = if (isMine) Color.White else Color.Black,
-                                        fontSize = 16.sp
-                                    )
-                                    if (isMine) {
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        val icon = if (msg.status == "enviada") Icons.Default.Check else Icons.Default.DoneAll
-                                        val iconTint = if (msg.status == "lida") Color(0xFF4CAF50) else Color(0xFFE0E0E0)
-                                        Icon(
-                                            imageVector = icon,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp),
-                                            tint = iconTint
+                                    // TEXTO E HORA
+                                    Row(verticalAlignment = Alignment.Bottom) {
+                                        Text(
+                                            text = msg.content,
+                                            color = if (isMine) Color.White else Color.Black,
+                                            fontSize = 16.sp,
+                                            lineHeight = 22.sp // Dá espaço para emojis não ficarem cortados
                                         )
+                                        Spacer(modifier = Modifier.width(8.dp))
+
+                                        // Hora da mensagem + Status
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = formatMessageTime(msg.created_at),
+                                                color = if (isMine) Color.White.copy(alpha = 0.7f) else Color.Gray,
+                                                fontSize = 10.sp
+                                            )
+
+                                            if (isMine) {
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                val icon = if (msg.status == "enviada") Icons.Default.Check else Icons.Default.DoneAll
+                                                val iconTint = if (msg.status == "lida") Color(0xFF4CAF50) else Color.White.copy(alpha = 0.8f)
+                                                Icon(
+                                                    imageVector = icon,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(14.dp),
+                                                    tint = iconTint
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+
+                    // CABEÇALHO DA DATA ("Hoje", "Ontem")
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = dateHeader,
+                                color = Color.DarkGray,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier
+                                    .background(Color.Black.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
                 }
             }
+
 
             if (errorMessage != null) {
                 Card(
@@ -716,17 +945,24 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 }
             }
 
-            Row(modifier = Modifier.fillMaxWidth().background(Color.White).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (isUploading) {
                     Spacer(modifier = Modifier.weight(1f))
-                    CircularProgressIndicator(modifier = Modifier.size(48.dp).padding(8.dp), color = blueColor)
+                    CircularProgressIndicator(modifier = Modifier
+                        .size(48.dp)
+                        .padding(8.dp), color = blueColor)
                     Spacer(modifier = Modifier.weight(1f))
                 } else if (isRecording) {
                     Text(
                         text = "A gravar áudio...",
                         color = Color.Red,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f).padding(start = 16.dp)
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 16.dp)
                     )
                     IconButton(
                         onClick = { stopRecordingAndSend() },
@@ -959,4 +1195,23 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
             }
         }
     }
+    // ---- dialog de gerenciamento de grupo
+    if (showGroupManagement && isGroup) {
+        Dialog(onDismissRequest = { showGroupManagement = false }) {
+            Card(Modifier.padding(16.dp)) {
+                GroupManagementScreen(
+                    conversationId = conversationId,
+                    currentName = contactName,
+                    currentImageUrl = contactImageUrl,
+                    onNameUpdated = { contactName = it },
+                    onImageChanged = { contactImageUrl = it },
+                    onBack = { showGroupManagement = false }
+                )
+
+
+            }
+        }
+    }
+
+// --- fim
 }
