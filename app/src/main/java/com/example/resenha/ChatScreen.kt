@@ -113,7 +113,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
     //----bruna
     var contactImageUrl by remember { mutableStateOf<String?>(null) }
     var showGroupManagement by remember { mutableStateOf(false) }
-    var isGroup by remember { mutableStateOf(false) }  // Carregue do conv.is_group
+    var isGroup by remember { mutableStateOf(false) }  // Carregado de conv.isGroup
     var members by remember { mutableStateOf(listOf<UserProfile>()) }
 
     //------
@@ -529,11 +529,11 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     val conv = convs.firstOrNull()
                     if (conv != null) {
                         // se der ruim tirar
-                        isGroup = conv.is_group
+                        isGroup = conv.isGroup
                         //
-                        android.util.Log.d("CHAT_SCREEN", "Conversa encontrada: ${conv.name} (is_group=${conv.is_group})")
+                        android.util.Log.d("CHAT_SCREEN", "Conversa encontrada: ${conv.name} (isGroup=${conv.isGroup})")
 
-                        if (conv.is_group) {
+                        if (conv.isGroup) {
                             contactName = conv.name ?: "Grupo Sem Nome"
                             contactImageUrl = conv.group_image_url
                         } else {
@@ -631,7 +631,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         fontWeight = FontWeight.Bold,
                         color = Color.Black)
                       //implementando o gerenciador de grupo
-                        if (isGroup) {  // Você define isso carregando conv.is_group
+                        if (isGroup) {  // Você define isso carregando conv.isGroup
                             Spacer(Modifier.width(8.dp))
                             IconButton(
                                 onClick = { showGroupManagement = true },

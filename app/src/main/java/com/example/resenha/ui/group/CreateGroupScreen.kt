@@ -87,7 +87,7 @@ fun CreateGroupScreen(onBack: () -> Unit, onGroupCreated: (String) -> Unit) {
                             android.util.Log.d("RESENHA_GRUPO", "GroupId gerado: $groupId")
 
                             SupabaseClient.client.from("conversations").insert(  // ✅ Agora pode usar suspend
-                                Conversation(id = groupId, is_group = true, name = groupName)
+                                Conversation(id = groupId, isGroup = true, name = groupName)
 
                             )
                             android.util.Log.d("RESENHA_GRUPO", "Conversa inserida")

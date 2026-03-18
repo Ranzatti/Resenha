@@ -1,5 +1,6 @@
 package com.example.resenha.data
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -13,7 +14,7 @@ data class UserProfile(
 @Serializable
 data class Chat(
     val id: String,
-    val is_group: Boolean = false,
+    @SerialName("is_group") val isGroup: Boolean = false,
     val name: String? = null,
     val group_image_url: String? = null
 )

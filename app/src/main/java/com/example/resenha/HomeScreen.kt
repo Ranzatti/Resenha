@@ -180,7 +180,7 @@ fun HomeScreen(
                     val displayContactName: String
                     val displayImageUrl: String?
 
-                    if (conv.is_group) {
+                    if (conv.isGroup) {
                         displayContactName = conv.name ?: "Grupo Sem Nome"
                         displayImageUrl = conv.group_image_url
                     } else {

@@ -3,6 +3,7 @@ package com.example.resenha.data
 import android.annotation.SuppressLint
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.InternalSerializationApi
 
@@ -17,7 +18,7 @@ data class Conversation(
     val last_message_sender_id: String? = null,
     val last_message_status: String? = "enviada",
     val last_message_time: String? = null,
-    val is_group: Boolean = false,
+    @SerialName("is_group") val isGroup: Boolean = false,
     val name: String? = null,
     val group_image_url: String? = null,
 )

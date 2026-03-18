@@ -122,7 +122,7 @@ class MainActivity : ComponentActivity() {
                                                     id = chatId,
                                                     user_1 = myId,
                                                     user_2 = selectedUser.id,
-                                                    is_group = false,
+                                                    isGroup = false,
                                                     last_message = "Iniciou uma resenha"
                                                 )
                                             )
