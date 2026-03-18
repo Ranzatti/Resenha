@@ -23,13 +23,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -83,7 +86,7 @@ data class ChatItemUiState(
 fun HomeScreen(
     onConversationClick: (Conversation) -> Unit,
     onNewChatClick: () -> Unit,
-    onNewGroupClick: () -> Unit, // cria o grupo
+    onNewGroupClick: () -> Unit,
     onLogoutClick: () -> Unit,
     onProfileClick: () -> Unit
 ) {
@@ -101,15 +104,18 @@ fun HomeScreen(
     var previousUnreadCount by remember { mutableStateOf(0) }
     var isInitialLoad by remember { mutableStateOf(true) }
 
+    // --- VARIÁVEIS DE PESQUISA NA TELA INICIAL ---
+    var isSearchActive by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+
     val launcher = rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
         onResult = { isGranted -> }
     )
-    //----
+
     val profileViewModel: ProfileViewModel = viewModel()
     var profileImageUrl by remember { mutableStateOf<String?>(null) }
     var userName by remember { mutableStateOf("") }
-    //----
 
     LaunchedEffect(Unit) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -126,14 +132,12 @@ fun HomeScreen(
     fun loadConversations() {
         scope.launch {
             try {
-                val profiles =
-                    SupabaseClient.client.from("users").select().decodeList<UserProfile>()
+                val profiles = SupabaseClient.client.from("users").select().decodeList<UserProfile>()
                 val usersMap = profiles.associateBy { it.id }
 
-                val myParticipations =
-                    SupabaseClient.client.from("conversation_participants")
-                        .select { filter { eq("user_id", currentUserId) } }
-                        .decodeList<ConversationParticipant>()
+                val myParticipations = SupabaseClient.client.from("conversation_participants")
+                    .select { filter { eq("user_id", currentUserId) } }
+                    .decodeList<ConversationParticipant>()
                 val myGroupIds = myParticipations.map { it.conversation_id }
 
                 val privateConvs = SupabaseClient.client.from("conversations")
@@ -160,8 +164,7 @@ fun HomeScreen(
                         }
                     }.decodeList<MessageBadge>()
 
-                val unreadMap =
-                    unreadMsgs.groupBy { it.conversation_id }.mapValues { it.value.size }
+                val unreadMap = unreadMsgs.groupBy { it.conversation_id }.mapValues { it.value.size }
 
                 val totalUnreadNow = unreadMsgs.size
 
@@ -234,13 +237,12 @@ fun HomeScreen(
                                         eq("status", "enviada")
                                     }
                                 }
-                            } catch (e: Exception) {
-                            }
+                            } catch (e: Exception) {}
                         }
                     }
                 }
-            } catch (e: Exception)
-            {android.util.Log.e("RESENHA_HOME", "Erro ao carregar conversas: ${e.message}", e)
+            } catch (e: Exception) {
+                android.util.Log.e("RESENHA_HOME", "Erro ao carregar conversas: ${e.message}", e)
             } finally {
                 isLoading = false
             }
@@ -279,8 +281,7 @@ fun HomeScreen(
                     changeFlow.collect { loadConversations() }
                 }
                 channel.subscribe()
-            } catch (e: Exception) {
-            }
+            } catch (e: Exception) {}
         }
 
         scope.launch {
@@ -311,46 +312,102 @@ fun HomeScreen(
 
     var showFabMenu by remember { mutableStateOf(false)}
 
+    // --- LÓGICA DE FILTRAGEM LOCAL ---
+    val displayedConversations = remember(conversationsList, searchQuery) {
+        if (searchQuery.isBlank()) {
+            conversationsList
+        } else {
+            conversationsList.filter {
+                it.contactName.contains(searchQuery, ignoreCase = true)
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    IconButton(
-                        onClick = onProfileClick,
-                        modifier = Modifier.padding(start = 8.dp)
-                    ) {
-                        val fallbackName = if (userName.isNotBlank()) userName else "User"
-                        val finalUrl = profileImageUrl ?: "https://ui-avatars.com/api/?name=$fallbackName&background=94ADFF&color=fff"
+            if (isSearchActive) {
+                TopAppBar(
+                    title = {
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Buscar resenha...", color = Color.Gray) },
+                            singleLine = true,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                focusedTextColor = Color.Black,
+                                unfocusedTextColor = Color.Black
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            isSearchActive = false
+                            searchQuery = ""
+                        }) {
+                            Icon(Icons.Default.ArrowBack, null, tint = Color.Black)
+                        }
+                    },
+                    actions = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Close, null, tint = Color.Black)
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            } else {
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onProfileClick,
+                            modifier = Modifier.padding(start = 8.dp)
+                        ) {
+                            val fallbackName = if (userName.isNotBlank()) userName else "User"
+                            val finalUrl = profileImageUrl ?: "https://ui-avatars.com/api/?name=$fallbackName&background=94ADFF&color=fff"
 
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(finalUrl)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = "Meu Perfil",
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color.LightGray),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-                },
-                title = { Text("Resenhas Ativas", fontWeight = FontWeight.Bold, color = Color.Black) },
-                actions = {
-                    IconButton(onClick = onLogoutClick) {
-                        Icon(
-                            Icons.Default.ExitToApp,
-                            null,
-                            tint = Color.Black
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(finalUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "Meu Perfil",
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.LightGray),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    },
+                    title = { Text("Resenhas Ativas", fontWeight = FontWeight.Bold, color = Color.Black) },
+                    actions = {
+                        // BOTAO DE LUPA PARA ATIVAR A PESQUISA
+                        IconButton(onClick = { isSearchActive = true }) {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = "Buscar Resenha",
+                                tint = Color.Black
+                            )
+                        }
+                        IconButton(onClick = onLogoutClick) {
+                            Icon(
+                                Icons.Default.ExitToApp,
+                                contentDescription = "Sair",
+                                tint = Color.Black
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            }
         },
         floatingActionButton = {
-
             Box {
                 FloatingActionButton(
                     onClick = { showFabMenu = true },
@@ -407,6 +464,18 @@ fun HomeScreen(
                 Text("Nenhuma resenha ainda.", color = Color.Black, fontWeight = FontWeight.Medium)
                 Text("Toque no + para buscar pessoas!", color = Color.DarkGray)
             }
+        } else if (displayedConversations.isEmpty() && isSearchActive) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Default.Search, null, modifier = Modifier.size(64.dp), tint = Color.LightGray)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Nenhuma resenha encontrada.", color = Color.Gray, fontWeight = FontWeight.Medium)
+            }
         } else {
             LazyColumn(
                 modifier = Modifier
@@ -414,14 +483,15 @@ fun HomeScreen(
                     .fillMaxSize(),
                 contentPadding = PaddingValues(16.dp)
             ) {
-                items(conversationsList, key = { it.conversation.id }) { item ->
+                // AQUI USAMOS A LISTA FILTRADA!
+                items(displayedConversations, key = { it.conversation.id }) { item ->
                     ConversationItem(
                         item = item,
                         currentUserId = currentUserId,
                         blueColor = blueColor,
                         badgeColor = whatsappGreen,
                         onClick = { onConversationClick(item.conversation) },
-                        onLongClick = { togglePin(item) } // RESTAURADO O CLIQUE LONGO
+                        onLongClick = { togglePin(item) }
                     )
                 }
             }
@@ -437,7 +507,7 @@ fun ConversationItem(
     blueColor: Color,
     badgeColor: Color,
     onClick: () -> Unit,
-    onLongClick: () -> Unit // RESTAURADO AQUI
+    onLongClick: () -> Unit
 ) {
 
     fun formatTimeDisplay(rawTime: String?): String {
@@ -464,7 +534,7 @@ fun ConversationItem(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
-            .combinedClickable( // SUBSTITUÍDO O CLICKABLE SIMPLES PELO COMBINADO
+            .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
