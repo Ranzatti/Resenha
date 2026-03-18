@@ -1,6 +1,7 @@
 package com.example.resenha.ui.group
 
 import android.net.Uri
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -24,7 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -36,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -46,8 +49,6 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.launch
-import android.util.Log
-import androidx.compose.foundation.layout.width
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,10 +70,8 @@ fun GroupManagementScreen(
     var isSaving by remember { mutableStateOf(false) }
     val currentUserId = SupabaseClient.client.auth.currentUserOrNull()?.id ?: ""
 
-    // 👈 ESTADO LOCAL dos membros - resolve tudo!
     var localMembers by remember { mutableStateOf(listOf<UserProfile>()) }
 
-    // 👈 CARREGA MEMBROS na inicialização
     LaunchedEffect(conversationId) {
         scope.launch {
             try {
@@ -87,7 +86,6 @@ fun GroupManagementScreen(
                             .decodeSingle<UserProfile>()
                     } catch (e: Exception) { null }
                 }
-                Log.d("GROUP_MEMBERS", "Carregados ${localMembers.size} membros")
             } catch (e: Exception) {
                 Log.e("GROUP_MEMBERS", "Erro carregar membros", e)
             }
@@ -114,7 +112,6 @@ fun GroupManagementScreen(
         }
     }
 
-    // Busca usuários disponíveis
     LaunchedEffect(searchUser) {
         if (searchUser.length > 1) {
             scope.launch {
@@ -126,7 +123,7 @@ fun GroupManagementScreen(
                                 neq("id", currentUserId)
                             }
                         }.decodeList<UserProfile>()
-                        .filter { user -> localMembers.none { it.id == user.id } }  // 👈 localMembers!
+                        .filter { user -> localMembers.none { it.id == user.id } }
                 } catch (e: Exception) {
                     Log.e("GROUP_SEARCH", "Erro busca", e)
                 }
@@ -136,64 +133,50 @@ fun GroupManagementScreen(
         }
     }
 
-    // ADICIONAR MEMBRO
-    val addMember = { userId: String ->
-        scope.launch {
-            try {
-                SupabaseClient.client.from("conversation_participants").upsert(
-                    ConversationParticipant(
-                        conversation_id = conversationId,
-                        user_id = userId
-                    )
-                ) { ignoreDuplicates = true }
+    // --- ATUALIZAÇÃO OTIMISTA (ADICIONAR) ---
+    val addMember = { user: UserProfile ->
+        if (localMembers.none { it.id == user.id }) {
+            // 1. Altera a Interface Instantaneamente
+            localMembers = localMembers + user
+            availableUsers = availableUsers.filter { it.id != user.id }
+            searchUser = "" // Limpa o campo de busca
 
-                // 👈 RECARREGA LOCALMENTE
-                val participants = SupabaseClient.client.from("conversation_participants")
-                    .select { filter { eq("conversation_id", conversationId) } }
-                    .decodeList<ConversationParticipant>()
-
-                localMembers = participants.mapNotNull { participant ->
-                    try {
-                        SupabaseClient.client.from("users")
-                            .select { filter { eq("id", participant.user_id) } }
-                            .decodeSingle<UserProfile>()
-                    } catch (e: Exception) { null }
+            // 2. Salva no banco de dados de forma invisível
+            scope.launch {
+                try {
+                    SupabaseClient.client.from("conversation_participants").upsert(
+                        ConversationParticipant(
+                            conversation_id = conversationId,
+                            user_id = user.id
+                        )
+                    ) { ignoreDuplicates = true }
+                } catch (e: Exception) {
+                    Log.e("GROUP_ADD", "Erro adicionar", e)
+                    // Reverte a animação caso dê erro de internet
+                    localMembers = localMembers.filter { it.id != user.id }
                 }
-
-                Log.d("GROUP_ADD", "Adicionado: $userId. Total: ${localMembers.size}")
-            } catch (e: Exception) {
-                Log.e("GROUP_ADD", "Erro adicionar", e)
             }
         }
     }
 
-    // REMOVER MEMBRO
-    val removeMember = { userId: String ->
+    // --- ATUALIZAÇÃO OTIMISTA (REMOVER) ---
+    val removeMember = { user: UserProfile ->
+        // 1. Remove da Interface Instantaneamente
+        localMembers = localMembers.filter { it.id != user.id }
+
+        // 2. Remove do banco de dados de forma invisível
         scope.launch {
             try {
                 SupabaseClient.client.from("conversation_participants").delete {
                     filter {
                         eq("conversation_id", conversationId)
-                        eq("user_id", userId)
+                        eq("user_id", user.id)
                     }
                 }
-
-                // 👈 RECARREGA LOCALMENTE (igual add)
-                val participants = SupabaseClient.client.from("conversation_participants")
-                    .select { filter { eq("conversation_id", conversationId) } }
-                    .decodeList<ConversationParticipant>()
-
-                localMembers = participants.mapNotNull { participant ->
-                    try {
-                        SupabaseClient.client.from("users")
-                            .select { filter { eq("id", participant.user_id) } }
-                            .decodeSingle<UserProfile>()
-                    } catch (e: Exception) { null }
-                }
-
-                Log.d("GROUP_REMOVE", "Removido: $userId. Total: ${localMembers.size}")
             } catch (e: Exception) {
                 Log.e("GROUP_REMOVE", "Erro remover", e)
+                // Devolve o usuário para a tela em caso de erro
+                localMembers = localMembers + user
             }
         }
     }
@@ -201,38 +184,33 @@ fun GroupManagementScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Gerenciar Grupo", fontWeight = FontWeight.Bold) },
+                title = { Text("Gerenciar Grupo", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.Black) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "Fechar")
+                        Icon(Icons.Default.ArrowBack, "Fechar", tint = Color.Black)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         },
         bottomBar = {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding( 16.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Botão Voltar ao Grupo
                 Button(
                     onClick = onBack,
-                    modifier = Modifier.weight(1f).height(56.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(50.dp),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Gray)
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9E9E9E))
                 ) {
-                    Text(
-                        "Voltar ao Grupo",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+                    Text("Voltar", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
 
-                // Botão Salvar (último!)
                 Button(
                     onClick = {
                         scope.launch {
@@ -244,172 +222,219 @@ fun GroupManagementScreen(
                                 }) { filter { eq("id", conversationId) } }
                                 onNameUpdated(newName)
                                 onImageChanged(newImageUrl.ifBlank { null })
+                                onBack()
                             } finally {
                                 isSaving = false
                             }
                         }
                     },
-                    modifier = Modifier.weight(1f).height(56.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(50.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = blueColor),
                     enabled = newName.isNotBlank()
                 ) {
-                    Text(
-                        "Salvar Alterações",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+                    Text("Salvar", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
         },
-        containerColor = Color(0xFFF5F7FF)
+        containerColor = Color.White
     ) { padding ->
 
-            Column(
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            // Foto do Grupo
+            Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(16.dp)
+                    .fillMaxWidth()
+                    .padding(top = 8.dp, bottom = 16.dp),
+                contentAlignment = Alignment.Center
             ) {
-                // Foto
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(modifier = Modifier.size(120.dp), contentAlignment = Alignment.BottomEnd) {
-                        AsyncImage(
-                            model = newImageUrl.ifBlank { "https://ui-avatars.com/api/?name=${newName.take(1)}&background=94ADFF&color=fff" },
-                            contentDescription = "Foto do grupo",
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(CircleShape)
-                                .background(Color.LightGray),
-                            contentScale = ContentScale.Crop
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(blueColor)
-                                .clickable { imagePickerLauncher.launch("image/*") }
-                                .padding(8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.CameraAlt, contentDescription = "Foto", tint = Color.White, modifier = Modifier.size(20.dp))
-                        }
+                Box(modifier = Modifier.size(100.dp), contentAlignment = Alignment.BottomEnd) {
+                    AsyncImage(
+                        model = newImageUrl.ifBlank { "https://ui-avatars.com/api/?name=${newName.take(1)}&background=94ADFF&color=fff" },
+                        contentDescription = "Foto do grupo",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .background(Color(0xFFF0F0F0)),
+                        contentScale = ContentScale.Crop
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(blueColor)
+                            .clickable { imagePickerLauncher.launch("image/*") }
+                            .border(2.dp, Color.White, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = "Foto", tint = Color.White, modifier = Modifier.size(18.dp))
                     }
                 }
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Nome
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it },
-                    label = { Text("Nome do grupo") },
-                    leadingIcon = { Icon(Icons.Default.Group, null, tint = blueColor) },
-                    textStyle = LocalTextStyle.current.copy(color = blueColor),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // 👈 MEMBROS ATUAIS (localMembers)
-                Text("Membros (${localMembers.size})", fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
-                LazyRow(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(localMembers) { member ->
-                        Card(
-                            modifier = Modifier.size(70.dp)
-                        ) {
-                            Box {
-                                AsyncImage(
-                                    model = member.profile_image_url ?: "https://ui-avatars.com/api/?name=${member.name?.take(1)}",
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                    contentScale = ContentScale.Crop
-                                )
-                                IconButton(
-                                    onClick = { removeMember(member.id) },
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .align(Alignment.TopEnd)
-                                        .padding(4.dp)
-                                ) {
-                                    Icon(Icons.Default.Delete, "Remover", tint = Color.Red)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // 👈 BUSCA USUÁRIOS
-                Text("Adicionar membros", fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
-                OutlinedTextField(
-                    value = searchUser,
-                    onValueChange = { searchUser = it },
-                    label = { Text("Buscar usuário", color = blueColor) },
-                    leadingIcon = { Icon(Icons.Default.Search, null, tint = blueColor) },
-                    textStyle = LocalTextStyle.current.copy(color = blueColor),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(availableUsers) { user ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { addMember(user.id) }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                AsyncImage(
-                                    model = user.profile_image_url ?: "https://ui-avatars.com/api/?name=${user.name?.take(1)}",
-                                    contentDescription = null,
-                                    modifier = Modifier.size(40.dp).clip(CircleShape),
-                                    contentScale = ContentScale.Crop
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(user.name ?: "", fontWeight = FontWeight.Medium)
-                            }
-                        }
-                    }
-                }
-
-
-
-
-
-
-
-
             }
+
+            // Nome do Grupo
+            OutlinedTextField(
+                value = newName,
+                onValueChange = { newName = it },
+                label = { Text("Nome do grupo", color = Color.Gray) },
+                leadingIcon = { Icon(Icons.Default.Group, null, tint = blueColor) },
+                textStyle = LocalTextStyle.current.copy(color = Color.Black),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = blueColor,
+                    focusedLabelColor = blueColor,
+                    focusedTextColor = Color.Black,
+                    unfocusedTextColor = Color.Black
+                )
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Membros Atuais
+            Text(
+                text = "Membros do Grupo (${localMembers.size})",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = Color.Black,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Passa o objeto "member" inteiro para a função de remover
+                items(localMembers) { member ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.width(64.dp)
+                    ) {
+                        Box(modifier = Modifier.size(56.dp)) {
+                            AsyncImage(
+                                model = member.profile_image_url ?: "https://ui-avatars.com/api/?name=${member.name?.take(1)}&background=94ADFF&color=fff",
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFF0F0F0)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .align(Alignment.TopEnd)
+                                    .clip(CircleShape)
+                                    .background(Color.Red)
+                                    .border(1.5.dp, Color.White, CircleShape)
+                                    .clickable { removeMember(member) }, // OTIMIZADO
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Remover", tint = Color.White, modifier = Modifier.size(14.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = member.name ?: "",
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = Color.Black
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Busca de Usuários
+            Text(
+                text = "Adicionar novos membros",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = Color.Black,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+
+            OutlinedTextField(
+                value = searchUser,
+                onValueChange = { searchUser = it },
+                placeholder = { Text("Procurar por nome...", color = Color.DarkGray) },
+                leadingIcon = { Icon(Icons.Default.Search, null, tint = blueColor) },
+                textStyle = LocalTextStyle.current.copy(color = Color.Black),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = blueColor,
+                    unfocusedContainerColor = Color(0xFFF5F7FF),
+                    focusedContainerColor = Color(0xFFF5F7FF),
+                    focusedTextColor = Color.Black,
+                    unfocusedTextColor = Color.Black
+                )
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Passa o objeto "user" inteiro para a função de adicionar
+                items(availableUsers) { user ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { addMember(user) }, // OTIMIZADO
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F7FF)),
+                        shape = RoundedCornerShape(12.dp),
+                        elevation = CardDefaults.cardElevation(0.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AsyncImage(
+                                model = user.profile_image_url ?: "https://ui-avatars.com/api/?name=${user.name?.take(1)}&background=94ADFF&color=fff",
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.LightGray),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(user.name ?: "", fontWeight = FontWeight.Bold, color = Color.Black)
+                        }
+                    }
+                }
+            }
+        }
+
         if (isSaving) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.2f)),  // Fundo escuro
+                    .background(Color.Black.copy(alpha = 0.3f)),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(color = blueColor)
             }
         }
-        }
     }
-
+}

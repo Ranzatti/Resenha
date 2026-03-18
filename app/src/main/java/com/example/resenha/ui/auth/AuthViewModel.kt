@@ -13,8 +13,8 @@ import kotlinx.coroutines.launch
 
 class AuthViewModel : ViewModel() {
     val userName = mutableStateOf("")
-    val email = mutableStateOf("usuario1@email.com")
-    val password = mutableStateOf("123456")
+    val email = mutableStateOf("")
+    val password = mutableStateOf("")
     val isLoading = mutableStateOf(false)
     val errorMessage = mutableStateOf<String?>(null)
 

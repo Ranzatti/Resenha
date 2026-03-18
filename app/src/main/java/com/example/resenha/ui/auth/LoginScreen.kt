@@ -60,8 +60,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit, onNavigateToSignUp: () -> Unit) {
                 OutlinedTextField(
                     value = viewModel.email.value,
                     onValueChange = { viewModel.email.value = it },
-                    label = { Text("E-mail acadêmico", color = Color.Black) },
-//                    placeholder = { Text("aluno@ufu.br", color = Color.Gray) },
+                    label = { Text("e-mail", color = Color.Black) },
                     leadingIcon = { Icon(Icons.Default.Email, null, tint = blueColor) },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),

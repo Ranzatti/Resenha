@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -58,6 +60,8 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -83,6 +87,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
+import com.example.resenha.data.ChatMessage
 import com.example.resenha.data.Conversation
 import com.example.resenha.data.ConversationParticipant
 import com.example.resenha.data.UserProfile
@@ -98,26 +103,12 @@ import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.InternalSerializationApi
-import kotlinx.serialization.Serializable
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
-
-@OptIn(InternalSerializationApi::class)
-@Serializable
-data class ChatMessage(
-    val id: String,
-    val conversation_id: String,
-    val sender_id: String,
-    val content: String,
-    val created_at: String,
-    val status: String = "enviada",
-    val media_url: String? = null,
-    val media_type: String? = null
-)
 
 @OptIn(ExperimentalMaterial3Api::class, InternalSerializationApi::class)
 @Composable
@@ -129,7 +120,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var contactName by remember { mutableStateOf("Carregando...") }
 
-    // CORREÇÃO AQUI: "remember" guarda o ID na memória para não o perdermos ao abrir a galeria/câmera
     val currentUserId = remember { SupabaseClient.client.auth.currentUserOrNull()?.id ?: "" }
 
     val context = LocalContext.current
@@ -140,22 +130,16 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
 
     var showDeleteDialog by remember { mutableStateOf(false) }
 
-    // --- VARIÁVEIS DE PESQUISA ---
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
     val listState = rememberLazyListState()
 
-    //----bruna
     var contactImageUrl by remember { mutableStateOf<String?>(null) }
     var showGroupManagement by remember { mutableStateOf(false) }
-    var isGroup by remember { mutableStateOf(false) }  // Carregue do conv.is_group
+    var isGroup by remember { mutableStateOf(false) }
     var members by remember { mutableStateOf(listOf<UserProfile>()) }
 
-    //------
-
-    //--- bruna mudando a inteface amigavel
-    // Função para agrupar as datas
     fun formatHeaderDate(rawTime: String?): String {
         if (rawTime.isNullOrEmpty()) return "Desconhecido"
         return try {
@@ -177,7 +161,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         }
     }
 
-    // Função para pegar a hora (Ex: "14:30")
     fun formatMessageTime(rawTime: String?): String {
         if (rawTime.isNullOrEmpty()) return ""
         return try {
@@ -193,8 +176,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
             ""
         }
     }
-
-    //------
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty() && !isSearchActive) {
@@ -231,7 +212,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     .select { filter { eq("conversation_id", conversationId) } }
                     .decodeList<ChatMessage>()
 
-                messages = msgs.sortedBy { it.created_at }
+                messages = msgs.map { it.copy(content = CryptoUtils.decrypt(it.content)) }.sortedBy { it.created_at }
 
                 val mensagensNaoLidas =
                     msgs.filter { it.sender_id != currentUserId && it.status != "lida" }
@@ -584,26 +565,13 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         scope.launch {
             repeat(10) { attempt ->
                 try {
-                    android.util.Log.d(
-                        "CHAT_SCREEN",
-                        "Tentativa ${attempt + 1}/10 para ID: $conversationId"
-                    )
-
                     val convs = SupabaseClient.client.from("conversations")
                         .select { filter { eq("id", conversationId) } }
                         .decodeList<Conversation>()
 
-                    android.util.Log.d("CHAT_SCREEN", "Encontradas ${convs.size} conversas")
-
                     val conv = convs.firstOrNull()
                     if (conv != null) {
-                        // se der ruim tirar
                         isGroup = conv.is_group
-                        //
-                        android.util.Log.d(
-                            "CHAT_SCREEN",
-                            "Conversa encontrada: ${conv.name} (is_group=${conv.is_group})"
-                        )
 
                         if (conv.is_group) {
                             contactName = conv.name ?: "Grupo Sem Nome"
@@ -623,20 +591,14 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                 contactImageUrl = otherUser?.profile_image_url
                             }
                         }
-                        return@launch  // ✅ SAI DO LOOP
+                        return@launch
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e(
-                        "CHAT_SCREEN",
-                        "Tentativa ${attempt + 1} falhou: ${e.message}"
-                    )
                 }
 
                 contactName = "Carregando... (${attempt + 1}/10)"
-                kotlinx.coroutines.delay(800)  // 0.8s entre tentativas
+                kotlinx.coroutines.delay(800)
             }
-
-            android.util.Log.e("CHAT_SCREEN", "❌ Falhou após 10 tentativas para $conversationId")
             contactName = "Erro: conversa não encontrada"
         }
 
@@ -648,7 +610,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 launch { changeFlow.collect { recarregarMensagens() } }
                 channel.subscribe()
             } catch (e: Exception) {
-                android.util.Log.e("CHAT_REALTIME", "Erro realtime: ${e.message}", e)
             }
         }
 
@@ -660,7 +621,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         }
     }
 
-    //----bruna colocou um lauched para gerenciar os pariticipantes do grupo
     LaunchedEffect(conversationId, isGroup) {
         if (isGroup) {
             scope.launch {
@@ -677,14 +637,10 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         null
                     }
                 }
-                android.util.Log.d("CHAT_MEMBERS", "Carregados ${members.size} membros")
             }
         }
     }
-//----- fim
 
-
-    // --- CAIXA DE DIÁLOGO DE EXCLUSÃO ---
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
@@ -728,7 +684,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                 }
                             }
 
-                            // Plano B: Tentar apagar mensagens caso o Cascade falhe
                             try {
                                 SupabaseClient.client.from("messages").delete {
                                     filter { eq("conversation_id", conversationId) }
@@ -762,7 +717,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         )
     }
 
-    // --- LÓGICA DE FILTRAGEM LOCAL DE MENSAGENS ---
     val displayedMessages = remember(messages, searchQuery) {
         if (searchQuery.isBlank()) {
             messages
@@ -773,59 +727,102 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    //--- mostrar a foto na topbar
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        AsyncImage(
-                            model = coil.request.ImageRequest.Builder(LocalContext.current)
-                                .data(
-                                    contactImageUrl
-                                        ?: "https://ui-avatars.com/api/?name=$contactName&background=94ADFF&color=fff"
-                                )
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color.LightGray),
-                            contentScale = ContentScale.Crop
+            if (isSearchActive) {
+                TopAppBar(
+                    title = {
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Buscar na conversa...", color = Color.Gray) },
+                            singleLine = true,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                focusedTextColor = Color.Black,
+                                unfocusedTextColor = Color.Black
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            contactName,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Black
-                        )
-                        //implementando o gerenciador de grupo
-                        if (isGroup) {  // Você define isso carregando conv.is_group
-                            Spacer(Modifier.width(8.dp))
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            isSearchActive = false
+                            searchQuery = ""
+                        }) {
+                            Icon(Icons.Default.ArrowBack, null, tint = Color.Black)
+                        }
+                    },
+                    actions = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Close, null, tint = Color.Black)
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            AsyncImage(
+                                model = coil.request.ImageRequest.Builder(LocalContext.current)
+                                    .data(
+                                        contactImageUrl
+                                            ?: "https://ui-avatars.com/api/?name=$contactName&background=94ADFF&color=fff"
+                                    )
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.LightGray),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                contactName,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                Icons.Default.ArrowBack,
+                                null,
+                                tint = Color.Black
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { isSearchActive = true }) {
+                            Icon(Icons.Default.Search, contentDescription = "Buscar", tint = Color.Black)
+                        }
+
+                        if (isGroup) {
                             IconButton(
-                                onClick = { showGroupManagement = true },
-                                modifier = Modifier.size(32.dp)
+                                onClick = { showGroupManagement = true }
                             ) {
                                 Icon(
-                                    Icons.Default.Settings,  // ou Icons.Default.Settings
+                                    Icons.Default.Settings,
                                     contentDescription = "Gerenciar grupo",
                                     tint = Color.Black
                                 )
                             }
                         }
-                        //---fim
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.Default.ArrowBack,
-                            null,
-                            tint = Color.Black
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
+
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Excluir Conversa", tint = Color.Red)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            }
         },
         containerColor = Color(0xFFF5F7FF)
     ) { padding ->
@@ -834,38 +831,38 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            //---- bruna
-            val groupedMessages = messages.groupBy { formatHeaderDate(it.created_at) }
+            val groupedMessages = displayedMessages.groupBy { formatHeaderDate(it.created_at) }
 
             LazyColumn(
                 state = listState,
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 16.dp),
-                reverseLayout = true // Começa de baixo (mensagens mais recentes)
+                reverseLayout = true
             ) {
-                // Itera sobre as datas de forma invertida para o reverseLayout funcionar
                 groupedMessages.entries.reversed().forEach { (dateHeader, msgsForDate) ->
-
-                    // As mensagens do dia
                     items(msgsForDate.reversed(), key = { it.id }) { msg ->
                         val isMine = msg.sender_id == currentUserId
+
+                        // --- NOVA LÓGICA DE AVATAR DO REMETENTE ---
+                        val senderProfile = if (isGroup) members.find { it.id == msg.sender_id } else null
+                        val displayAvatarUrl = if (isGroup) {
+                            senderProfile?.profile_image_url ?: "https://ui-avatars.com/api/?name=${senderProfile?.name ?: "U"}&background=94ADFF&color=fff"
+                        } else {
+                            contactImageUrl ?: "https://ui-avatars.com/api/?name=$contactName&background=94ADFF&color=fff"
+                        }
 
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 6.dp),
                             horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
-                            verticalAlignment = Alignment.Bottom // Alinha a bolha com a base do avatar
+                            verticalAlignment = Alignment.Bottom
                         ) {
-                            // AVATAR DO CONTATO (só mostra se a mensagem não for sua)
                             if (!isMine) {
                                 AsyncImage(
                                     model = coil.request.ImageRequest.Builder(LocalContext.current)
-                                        .data(
-                                            contactImageUrl
-                                                ?: "https://ui-avatars.com/api/?name=$contactName&background=94ADFF&color=fff"
-                                        )
+                                        .data(displayAvatarUrl) // FOTO CORRIGIDA AQUI
                                         .crossfade(true)
                                         .build(),
                                     contentDescription = "Avatar",
@@ -878,25 +875,34 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                 Spacer(modifier = Modifier.width(8.dp))
                             }
 
-                            // BOLHA DA MENSAGEM
                             Box(
                                 modifier = Modifier
-                                    .widthIn(max = 280.dp) // Limita a largura máxima da bolha
+                                    .widthIn(max = 280.dp)
                                     .background(
                                         color = if (isMine) blueColor else Color.White,
                                         shape = RoundedCornerShape(
                                             topStart = 16.dp,
                                             topEnd = 16.dp,
-                                            bottomStart = if (isMine) 16.dp else 4.dp, // Ponta da bolha para o contato
-                                            bottomEnd = if (isMine) 4.dp else 16.dp    // Ponta da bolha para você
+                                            bottomStart = if (isMine) 16.dp else 4.dp,
+                                            bottomEnd = if (isMine) 4.dp else 16.dp
                                         )
                                     )
                                     .padding(12.dp)
                             ) {
                                 Column(horizontalAlignment = if (isMine) Alignment.End else Alignment.Start) {
 
-                                    // AQUI VAI O CÓDIGO DA MÍDIA (Áudio, Vídeo, Imagem)
-                                    // (Mantenha os blocos if (msg.media_url != null) que você já tem no código original aqui dentro)
+                                    // --- BÔNUS: NOME DO REMETENTE NOS GRUPOS ---
+                                    if (isGroup && !isMine) {
+                                        val senderNameStr = senderProfile?.name ?: "Usuário"
+                                        Text(
+                                            text = senderNameStr,
+                                            color = blueColor,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(bottom = 2.dp)
+                                        )
+                                    }
+
                                     if (msg.media_url != null) {
                                         if (msg.media_type == "pdf") {
                                             Row(
@@ -1031,17 +1037,16 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                             )
                                         }
                                     }
-                                    // TEXTO E HORA
+
                                     Row(verticalAlignment = Alignment.Bottom) {
                                         Text(
                                             text = msg.content,
                                             color = if (isMine) Color.White else Color.Black,
                                             fontSize = 16.sp,
-                                            lineHeight = 22.sp // Dá espaço para emojis não ficarem cortados
+                                            lineHeight = 22.sp
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
 
-                                        // Hora da mensagem + Status
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
                                                 text = formatMessageTime(msg.created_at),
@@ -1071,7 +1076,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         }
                     }
 
-                    // CABEÇALHO DA DATA ("Hoje", "Ontem")
                     item {
                         Box(
                             modifier = Modifier
@@ -1486,7 +1490,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
             }
         }
     }
-    // ---- dialog de gerenciamento de grupo
+
     if (showGroupManagement && isGroup) {
         Dialog(onDismissRequest = { showGroupManagement = false }) {
             Card(Modifier.padding(16.dp)) {
@@ -1498,11 +1502,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     onImageChanged = { contactImageUrl = it },
                     onBack = { showGroupManagement = false }
                 )
-
-
             }
         }
     }
-
-// --- fim
 }
