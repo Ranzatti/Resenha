@@ -73,6 +73,8 @@ fun HomeScreen(
     onLogoutClick: () -> Unit,
     onProfileClick: () -> Unit
 ) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
     val scope = rememberCoroutineScope()
     val blueColor = Color(0xFF94ADFF)
     val whatsappGreen = Color(0xFF25D366)
@@ -119,8 +121,8 @@ fun HomeScreen(
 
                 val myParticipations =
                     SupabaseClient.client.from("conversation_participants")
-                    .select { filter { eq("user_id", currentUserId) } }
-                    .decodeList<ConversationParticipant>()
+                        .select { filter { eq("user_id", currentUserId) } }
+                        .decodeList<ConversationParticipant>()
                 val myGroupIds = myParticipations.map { it.conversation_id }
 
                 val privateConvs = SupabaseClient.client.from("conversations")
@@ -203,8 +205,11 @@ fun HomeScreen(
                         unreadCount = count)
                 }
 
-                conversationsList = mappedList.sortedByDescending { it.unreadCount > 0 }
-
+                conversationsList = mappedList.sortedWith(
+                    compareByDescending<ChatItemUiState> { it.conversation.is_pinned }
+                        .thenByDescending { it.unreadCount > 0 }
+                        .thenByDescending { it.conversation.last_message_time }
+                )
                 val convsToUpdate = mappedList.filter {
                     it.conversation.last_message_sender_id != currentUserId &&
                             it.conversation.last_message_status == "enviada"
@@ -237,7 +242,25 @@ fun HomeScreen(
             }
         }
     }
-
+    // --- fixar
+    fun togglePin(item: ChatItemUiState) {
+        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+        scope.launch {
+            try {
+                SupabaseClient.client.from("conversations").update(
+                    {
+                        set("is_pinned", !item.conversation.is_pinned)
+                    }
+                ) {
+                    filter { eq("id", item.conversation.id) }
+                }
+                loadConversations()
+            } catch (e: Exception) {
+                println("Erro ao fixar: ${e.message}")
+            }
+        }
+    }
+ // --- fim do fixar
     LaunchedEffect(Unit) {
         loadConversations()
 
@@ -262,8 +285,7 @@ fun HomeScreen(
         }
     }
     //-----
-    // Import essencial, garanta que ele esteja no topo do seu arquivo:
-// import com.example.resenha.data.UserProfile
+
 
     LaunchedEffect(Unit) {
         val userId = SupabaseClient.client.auth.currentUserOrNull()?.id
@@ -284,7 +306,7 @@ fun HomeScreen(
             }
         }
     }
- // --- bruna (criar um botão menu para a opção de ser uma nova conversa ou grupo)
+    // --- bruna (criar um botão menu para a opção de ser uma nova conversa ou grupo)
     var showFabMenu by remember { mutableStateOf(false)}
 
     Scaffold(
@@ -436,12 +458,31 @@ fun ConversationItem(item: ChatItemUiState, currentUserId: String, blueColor: Co
                 Text(item.contactName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.Black)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (item.conversation.last_message_sender_id == currentUserId) {
-                        val icon = if (item.conversation.last_message_status == "enviada") Icons.Default.Check else Icons.Default.DoneAll
-                        val iconTint = if (item.conversation.last_message_status == "lida") Color(0xFF4CAF50) else Color(0xFF9E9E9E)
+                        val icon =
+                            if (item.conversation.last_message_status == "enviada") Icons.Default.Check else Icons.Default.DoneAll
+                        val iconTint =
+                            if (item.conversation.last_message_status == "lida") Color(0xFF4CAF50) else Color(0xFF9E9E9E)
                         Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = iconTint)
                         Spacer(modifier = Modifier.width(4.dp))
                     }
-                    Text(item.conversation.last_message ?: "Inicie a conversa", maxLines = 1, fontSize = 14.sp, color = Color.DarkGray)
+                    if (item.conversation.is_pinned) {
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .rotate(45f),
+                            tint = blueColor
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    // AQUI APLICAMOS A CRIPTOGRAFIA NA TELA INICIAL
+                    val previewMessage = if (item.conversation.last_message.isNullOrEmpty()) {
+                        "Inicie a conversa"
+                    } else {
+                        CryptoUtils.decrypt(item.conversation.last_message)
+                    }
+                    Text(previewMessage, maxLines = 1, fontSize = 14.sp, color = Color.DarkGray)
                 }
             }
 

@@ -1,3 +1,4 @@
+
 package com.example.resenha.data
 
 import android.annotation.SuppressLint
@@ -20,6 +21,8 @@ data class Conversation(
     val is_group: Boolean = false,
     val name: String? = null,
     val group_image_url: String? = null,
+    val is_pinned: Boolean = false
+
 )
 // Opção B: manter id para leituras, mas não serializar no insert
 @OptIn(ExperimentalSerializationApi::class, InternalSerializationApi::class)

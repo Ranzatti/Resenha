@@ -1,3 +1,4 @@
+
 package com.example.resenha
 
 import android.Manifest
@@ -107,6 +108,12 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
     var isUploading by remember { mutableStateOf(false) }
     var expandedImageUrl by remember { mutableStateOf<String?>(null) }
     var showAttachmentMenu by remember { mutableStateOf(false) }
+
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    // --- VARIÁVEIS DE PESQUISA ---
+    var isSearchActive by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
 
     val listState = rememberLazyListState()
 
@@ -232,11 +239,13 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         timeFormat.timeZone = TimeZone.getTimeZone("UTC")
                         val currentTime = timeFormat.format(Date())
 
+                        val contentStr = "📷 Imagem da Câmera"
+
                         SupabaseClient.client.from("messages").insert(
                             mapOf(
                                 "conversation_id" to conversationId,
                                 "sender_id" to currentUserId,
-                                "content" to "📷 Imagem da Câmera",
+                                "content" to CryptoUtils.encrypt(contentStr),
                                 "status" to "enviada",
                                 "media_url" to publicUrl,
                                 "media_type" to "image"
@@ -244,7 +253,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         )
                         SupabaseClient.client.from("conversations").update(
                             {
-                                set("last_message", "📷 Imagem da Câmera")
+                                set("last_message", CryptoUtils.encrypt(contentStr))
                                 set("last_message_sender_id", currentUserId)
                                 set("last_message_status", "enviada")
                                 set("last_message_time", currentTime)
@@ -308,11 +317,13 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     timeFormat.timeZone = TimeZone.getTimeZone("UTC")
                     val currentTime = timeFormat.format(Date())
 
+                    val contentStr = "🎤 Mensagem de Voz"
+
                     SupabaseClient.client.from("messages").insert(
                         mapOf(
                             "conversation_id" to conversationId,
                             "sender_id" to currentUserId,
-                            "content" to "🎤 Mensagem de Voz",
+                            "content" to CryptoUtils.encrypt(contentStr),
                             "status" to "enviada",
                             "media_url" to publicUrl,
                             "media_type" to "audio"
@@ -320,7 +331,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     )
                     SupabaseClient.client.from("conversations").update(
                         {
-                            set("last_message", "🎤 Mensagem de Voz")
+                            set("last_message", CryptoUtils.encrypt(contentStr))
                             set("last_message_sender_id", currentUserId)
                             set("last_message_status", "enviada")
                             set("last_message_time", currentTime)
@@ -374,11 +385,13 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 timeFormat.timeZone = TimeZone.getTimeZone("UTC")
                 val currentTime = timeFormat.format(Date())
 
+                val contentStr = "📍 Localização Atual"
+
                 SupabaseClient.client.from("messages").insert(
                     mapOf(
                         "conversation_id" to conversationId,
                         "sender_id" to currentUserId,
-                        "content" to "📍 Localização Atual",
+                        "content" to CryptoUtils.encrypt(contentStr),
                         "status" to "enviada",
                         "media_url" to mapsLink,
                         "media_type" to "location"
@@ -386,7 +399,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 )
                 SupabaseClient.client.from("conversations").update(
                     {
-                        set("last_message", "📍 Localização")
+                        set("last_message", CryptoUtils.encrypt(contentStr))
                         set("last_message_sender_id", currentUserId)
                         set("last_message_status", "enviada")
                         set("last_message_time", currentTime)
@@ -486,7 +499,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                             mapOf(
                                 "conversation_id" to conversationId,
                                 "sender_id" to currentUserId,
-                                "content" to contentStr,
+                                "content" to CryptoUtils.encrypt(contentStr),
                                 "status" to "enviada",
                                 "media_url" to publicUrl,
                                 "media_type" to typeStr
@@ -494,7 +507,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         )
                         SupabaseClient.client.from("conversations").update(
                             {
-                                set("last_message", contentStr)
+                                set("last_message", CryptoUtils.encrypt(contentStr))
                                 set("last_message_sender_id", currentUserId)
                                 set("last_message_status", "enviada")
                                 set("last_message_time", currentTime)
@@ -585,6 +598,83 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
             }
         }
     }
+    // --- CAIXA DE DIÁLOGO DE EXCLUSÃO ---
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = {
+                Text(
+                    text = "Eliminar Resenha",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black
+                )
+            },
+            text = {
+                Text(
+                    text = "Tem a certeza que deseja apagar esta conversa para sempre? Todas as mensagens e os seus ficheiros de multimédia serão eliminados.",
+                    color = Color.DarkGray
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteDialog = false
+                    isUploading = true
+
+                    scope.launch {
+                        try {
+                            val myMediaMsgs = SupabaseClient.client.from("messages")
+                                .select {
+                                    filter {
+                                        eq("conversation_id", conversationId)
+                                        eq("sender_id", currentUserId)
+                                    }
+                                }
+                                .decodeList<ChatMessage>()
+
+                            val mediaUrls = myMediaMsgs.mapNotNull { it.media_url }
+                                .filter { it.contains("supabase.co/storage/v1/object/public/resenha/") }
+
+                            if (mediaUrls.isNotEmpty()) {
+                                val fileNames = mediaUrls.map { it.substringAfterLast("/") }
+                                try {
+                                    SupabaseClient.client.storage.from("resenha").delete(fileNames)
+                                } catch (e: Exception) {}
+                            }
+
+                            // Plano B: Tentar apagar mensagens caso o Cascade falhe
+                            try {
+                                SupabaseClient.client.from("messages").delete {
+                                    filter { eq("conversation_id", conversationId) }
+                                }
+                            } catch (e: Exception) {}
+
+                            SupabaseClient.client.from("conversations").delete {
+                                filter { eq("id", conversationId) }
+                            }
+
+                            isUploading = false
+                            onBack()
+                        } catch (e: Exception) {
+                            isUploading = false
+                            errorMessage = "Erro ao eliminar: Certifique-se de que ativou o Cascade no Supabase!"
+                        }
+                    }
+                }) { Text("Eliminar Tudo", color = Color.Red, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancelar", color = Color.Black) }
+            },
+            containerColor = Color.White
+        )
+    }
+    // --- LÓGICA DE FILTRAGEM LOCAL DE MENSAGENS ---
+    val displayedMessages = remember(messages, searchQuery) {
+        if (searchQuery.isBlank()) {
+            messages
+        } else {
+            messages.filter { it.content.contains(searchQuery, ignoreCase = true) }
+        }
+    }
 
     //----bruna colocou um lauched para gerenciar os pariticipantes do grupo
     LaunchedEffect(conversationId, isGroup) {
@@ -612,48 +702,100 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    //--- mostrar a foto na topbar
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        AsyncImage(
-                            model = coil.request.ImageRequest.Builder(LocalContext.current)
-                                .data(contactImageUrl ?: "https://ui-avatars.com/api/?name=$contactName&background=94ADFF&color=fff")
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = null,
-                            modifier = Modifier.size(36.dp).clip(CircleShape).background(Color.LightGray),
-                            contentScale = ContentScale.Crop
+            if (isSearchActive) {
+                TopAppBar(
+                    title = {
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Buscar na conversa...", color = Color.Gray) },
+                            singleLine = true,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                focusedTextColor = Color.Black,
+                                unfocusedTextColor = Color.Black
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        contactName,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black)
-                      //implementando o gerenciador de grupo
-                        if (isGroup) {  // Você define isso carregando conv.is_group
-                            Spacer(Modifier.width(8.dp))
-                            IconButton(
-                                onClick = { showGroupManagement = true },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Settings,  // ou Icons.Default.Settings
-                                    contentDescription = "Gerenciar grupo",
-                                    tint = Color.Black
-                                )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            isSearchActive = false
+                            searchQuery = ""
+                        }) {
+                            Icon(Icons.Default.ArrowBack, null, tint = Color.Black)
+                        }
+                    },
+                    actions = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Close, null, tint = Color.Black)
                             }
                         }
-                        //---fim
-                    }
-                        },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.Black) }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        // Mostrar a foto na topbar
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            AsyncImage(
+                                model = coil.request.ImageRequest.Builder(LocalContext.current)
+                                    .data(
+                                        contactImageUrl
+                                            ?: "https://ui-avatars.com/api/?name=$contactName&background=94ADFF&color=fff"
+                                    )
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.LightGray),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = contactName,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black
+                            )
+                            // Implementando o gerenciador de grupo
+                            if (isGroup) {  // Você define isso carregando conv.is_group
+                                Spacer(modifier = Modifier.width(8.dp))
+                                IconButton(
+                                    onClick = { showGroupManagement = true },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Settings,
+                                        contentDescription = "Gerenciar grupo",
+                                        tint = Color.Black
+                                    )
+                                }
+                            }
+                            // Fim
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowBack,
+                                contentDescription = null,
+                                tint = Color.Black
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            }
         },
-        containerColor = Color(0xFFF5F7FF)
+
+                containerColor = Color(0xFFF5F7FF)
     ) { padding ->
         Column(modifier = Modifier
             .padding(padding)

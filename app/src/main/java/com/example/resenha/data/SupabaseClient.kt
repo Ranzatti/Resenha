@@ -24,4 +24,4 @@ object SupabaseClient {
         install(Realtime)
     }
 
-}
+    }
