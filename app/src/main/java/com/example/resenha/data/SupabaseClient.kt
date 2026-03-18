@@ -5,7 +5,6 @@ import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.storage.Storage
-// novo
 import io.ktor.client.engine.okhttp.OkHttp
 
 object SupabaseClient {

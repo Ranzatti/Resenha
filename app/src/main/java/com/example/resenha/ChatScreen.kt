@@ -11,7 +11,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -23,7 +33,6 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
@@ -34,8 +43,30 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,7 +75,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -53,7 +83,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.example.resenha.data.Conversation
+import com.example.resenha.data.ConversationParticipant
+import com.example.resenha.data.UserProfile
 import com.example.resenha.network.SupabaseClient
+import com.example.resenha.ui.group.GroupManagementScreen
 import com.google.android.gms.location.LocationServices
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
@@ -63,18 +96,14 @@ import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.InternalSerializationApi
+import kotlinx.serialization.Serializable
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
-import com.example.resenha.data.UserProfile
-import coil.request.ImageRequest
-import com.example.resenha.ui.group.GroupManagementScreen
-import com.example.resenha.data.ConversationParticipant
 
 @OptIn(InternalSerializationApi::class)
 @Serializable
@@ -107,6 +136,12 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
     var isUploading by remember { mutableStateOf(false) }
     var expandedImageUrl by remember { mutableStateOf<String?>(null) }
     var showAttachmentMenu by remember { mutableStateOf(false) }
+
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    // --- VARIÁVEIS DE PESQUISA ---
+    var isSearchActive by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
 
     val listState = rememberLazyListState()
 
@@ -161,7 +196,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
     //------
 
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
+        if (messages.isNotEmpty() && !isSearchActive) {
             listState.animateScrollToItem(0)
         }
     }
@@ -192,11 +227,13 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         scope.launch {
             try {
                 val msgs = SupabaseClient.client.from("messages")
-                    .select { filter { eq("conversation_id", conversationId) } }.decodeList<ChatMessage>()
+                    .select { filter { eq("conversation_id", conversationId) } }
+                    .decodeList<ChatMessage>()
 
                 messages = msgs.sortedBy { it.created_at }
 
-                val mensagensNaoLidas = msgs.filter { it.sender_id != currentUserId && it.status != "lida" }
+                val mensagensNaoLidas =
+                    msgs.filter { it.sender_id != currentUserId && it.status != "lida" }
                 if (mensagensNaoLidas.isNotEmpty()) {
                     SupabaseClient.client.from("messages").update(
                         { set("status", "lida") }
@@ -211,84 +248,95 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         { set("last_message_status", "lida") }
                     ) { filter { eq("id", conversationId) } }
                 }
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+            }
         }
     }
 
-    val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        if (success && cameraImageUri != null) {
-            isUploading = true
-            errorMessage = null
-            scope.launch {
-                try {
-                    val bytes = context.contentResolver.openInputStream(cameraImageUri!!)?.use { it.readBytes() }
-                    if (bytes != null) {
-                        val fileName = "${UUID.randomUUID()}.jpg"
+    val takePictureLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+            if (success && cameraImageUri != null) {
+                isUploading = true
+                errorMessage = null
+                scope.launch {
+                    try {
+                        val bytes = context.contentResolver.openInputStream(cameraImageUri!!)
+                            ?.use { it.readBytes() }
+                        if (bytes != null) {
+                            val fileName = "${UUID.randomUUID()}.jpg"
 
-                        SupabaseClient.client.storage.from("resenha").upload(fileName, bytes)
-                        val publicUrl = SupabaseClient.client.storage.from("resenha").publicUrl(fileName)
+                            SupabaseClient.client.storage.from("resenha").upload(fileName, bytes)
+                            val publicUrl =
+                                SupabaseClient.client.storage.from("resenha").publicUrl(fileName)
 
-                        val timeFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
-                        timeFormat.timeZone = TimeZone.getTimeZone("UTC")
-                        val currentTime = timeFormat.format(Date())
-
-                        SupabaseClient.client.from("messages").insert(
-                            mapOf(
-                                "conversation_id" to conversationId,
-                                "sender_id" to currentUserId,
-                                "content" to "📷 Imagem da Câmera",
-                                "status" to "enviada",
-                                "media_url" to publicUrl,
-                                "media_type" to "image"
+                            val timeFormat = SimpleDateFormat(
+                                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+                                Locale.getDefault()
                             )
-                        )
-                        SupabaseClient.client.from("conversations").update(
-                            {
-                                set("last_message", "📷 Imagem da Câmera")
-                                set("last_message_sender_id", currentUserId)
-                                set("last_message_status", "enviada")
-                                set("last_message_time", currentTime)
-                            }
-                        ) { filter { eq("id", conversationId) } }
+                            timeFormat.timeZone = TimeZone.getTimeZone("UTC")
+                            val currentTime = timeFormat.format(Date())
 
-                        recarregarMensagens()
+                            val contentStr = "📷 Imagem da Câmera"
+
+                            SupabaseClient.client.from("messages").insert(
+                                mapOf(
+                                    "conversation_id" to conversationId,
+                                    "sender_id" to currentUserId,
+                                    "content" to CryptoUtils.encrypt(contentStr),
+                                    "status" to "enviada",
+                                    "media_url" to publicUrl,
+                                    "media_type" to "image"
+                                )
+                            )
+                            SupabaseClient.client.from("conversations").update(
+                                {
+                                    set("last_message", CryptoUtils.encrypt(contentStr))
+                                    set("last_message_sender_id", currentUserId)
+                                    set("last_message_status", "enviada")
+                                    set("last_message_time", currentTime)
+                                }
+                            ) { filter { eq("id", conversationId) } }
+
+                            recarregarMensagens()
+                        }
+                    } catch (e: Exception) {
+                        errorMessage = "Erro ao enviar foto da câmera: ${e.message}"
+                    } finally {
+                        isUploading = false
                     }
-                } catch (e: Exception) {
-                    errorMessage = "Erro ao enviar foto da câmera: ${e.message}"
-                } finally {
-                    isUploading = false
                 }
             }
         }
-    }
 
-    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-        if (isGranted) {
-            try {
-                val imagesFolder = File(context.cacheDir, "camera_images")
-                imagesFolder.mkdirs()
-                val tempImageFile = File(imagesFolder, "foto_${UUID.randomUUID()}.jpg")
+    val cameraPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            if (isGranted) {
+                try {
+                    val imagesFolder = File(context.cacheDir, "camera_images")
+                    imagesFolder.mkdirs()
+                    val tempImageFile = File(imagesFolder, "foto_${UUID.randomUUID()}.jpg")
 
-                val uri = FileProvider.getUriForFile(
-                    context,
-                    context.packageName + ".provider",
-                    tempImageFile
-                )
-                cameraImageUri = uri
-                takePictureLauncher.launch(uri)
-            } catch (e: Exception) {
-                errorMessage = "Erro ao abrir câmera: ${e.message}"
+                    val uri = FileProvider.getUriForFile(
+                        context,
+                        context.packageName + ".provider",
+                        tempImageFile
+                    )
+                    cameraImageUri = uri
+                    takePictureLauncher.launch(uri)
+                } catch (e: Exception) {
+                    errorMessage = "Erro ao abrir câmera: ${e.message}"
+                }
+            } else {
+                errorMessage = "Permissão de câmera negada."
             }
-        } else {
-            errorMessage = "Permissão de câmera negada."
         }
-    }
 
     fun stopRecordingAndSend() {
         if (!isRecording) return
         try {
             mediaRecorder?.stop()
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+        }
 
         mediaRecorder?.release()
         mediaRecorder = null
@@ -302,17 +350,21 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 if (bytes != null) {
                     val fileName = "${UUID.randomUUID()}.m4a"
                     SupabaseClient.client.storage.from("resenha").upload(fileName, bytes)
-                    val publicUrl = SupabaseClient.client.storage.from("resenha").publicUrl(fileName)
+                    val publicUrl =
+                        SupabaseClient.client.storage.from("resenha").publicUrl(fileName)
 
-                    val timeFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
+                    val timeFormat =
+                        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
                     timeFormat.timeZone = TimeZone.getTimeZone("UTC")
                     val currentTime = timeFormat.format(Date())
+
+                    val contentStr = "🎤 Mensagem de Voz"
 
                     SupabaseClient.client.from("messages").insert(
                         mapOf(
                             "conversation_id" to conversationId,
                             "sender_id" to currentUserId,
-                            "content" to "🎤 Mensagem de Voz",
+                            "content" to CryptoUtils.encrypt(contentStr),
                             "status" to "enviada",
                             "media_url" to publicUrl,
                             "media_type" to "audio"
@@ -320,7 +372,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     )
                     SupabaseClient.client.from("conversations").update(
                         {
-                            set("last_message", "🎤 Mensagem de Voz")
+                            set("last_message", CryptoUtils.encrypt(contentStr))
                             set("last_message_sender_id", currentUserId)
                             set("last_message_status", "enviada")
                             set("last_message_time", currentTime)
@@ -338,47 +390,51 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         }
     }
 
-    val recordPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-        if (isGranted) {
-            try {
-                val file = File(context.cacheDir, "voz_${UUID.randomUUID()}.m4a")
-                audioTempFile = file
-                mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    MediaRecorder(context)
-                } else {
-                    @Suppress("DEPRECATION")
-                    MediaRecorder()
-                }.apply {
-                    setAudioSource(MediaRecorder.AudioSource.MIC)
-                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                    setOutputFile(file.absolutePath)
-                    prepare()
-                    start()
+    val recordPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            if (isGranted) {
+                try {
+                    val file = File(context.cacheDir, "voz_${UUID.randomUUID()}.m4a")
+                    audioTempFile = file
+                    mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        MediaRecorder(context)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        MediaRecorder()
+                    }.apply {
+                        setAudioSource(MediaRecorder.AudioSource.MIC)
+                        setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                        setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                        setOutputFile(file.absolutePath)
+                        prepare()
+                        start()
+                    }
+                    isRecording = true
+                    errorMessage = null
+                } catch (e: Exception) {
+                    errorMessage = "Erro ao iniciar o microfone: ${e.message}"
                 }
-                isRecording = true
-                errorMessage = null
-            } catch (e: Exception) {
-                errorMessage = "Erro ao iniciar o microfone: ${e.message}"
+            } else {
+                errorMessage = "Permissão de microfone negada."
             }
-        } else {
-            errorMessage = "Permissão de microfone negada."
         }
-    }
 
     fun sendLocationMessage(lat: Double, lon: Double) {
         val mapsLink = "https://maps.google.com/?q=$lat,$lon"
         scope.launch {
             try {
-                val timeFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
+                val timeFormat =
+                    SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
                 timeFormat.timeZone = TimeZone.getTimeZone("UTC")
                 val currentTime = timeFormat.format(Date())
+
+                val contentStr = "📍 Localização Atual"
 
                 SupabaseClient.client.from("messages").insert(
                     mapOf(
                         "conversation_id" to conversationId,
                         "sender_id" to currentUserId,
-                        "content" to "📍 Localização Atual",
+                        "content" to CryptoUtils.encrypt(contentStr),
                         "status" to "enviada",
                         "media_url" to mapsLink,
                         "media_type" to "location"
@@ -386,7 +442,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 )
                 SupabaseClient.client.from("conversations").update(
                     {
-                        set("last_message", "📍 Localização")
+                        set("last_message", CryptoUtils.encrypt(contentStr))
                         set("last_message_sender_id", currentUserId)
                         set("last_message_status", "enviada")
                         set("last_message_time", currentTime)
@@ -411,7 +467,8 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     if (location != null) {
                         sendLocationMessage(location.latitude, location.longitude)
                     } else {
-                        errorMessage = "GPS não encontrou sua posição. Abra o Google Maps uma vez e tente novamente."
+                        errorMessage =
+                            "GPS não encontrou sua posição. Abra o Google Maps uma vez e tente novamente."
                     }
                 }
             } catch (e: SecurityException) {
@@ -422,95 +479,103 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         }
     }
 
-    val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) {
-            isUploading = true
-            errorMessage = null
-            scope.launch {
-                try {
-                    val mimeType = context.contentResolver.getType(uri) ?: ""
-                    val isImage = mimeType.startsWith("image/")
-                    val isPdf = mimeType == "application/pdf"
-                    val isAudio = mimeType.startsWith("audio/") || mimeType == "application/ogg"
-                    val isVideo = mimeType.startsWith("video/")
+    val fileLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+            if (uri != null) {
+                isUploading = true
+                errorMessage = null
+                scope.launch {
+                    try {
+                        val mimeType = context.contentResolver.getType(uri) ?: ""
+                        val isImage = mimeType.startsWith("image/")
+                        val isPdf = mimeType == "application/pdf"
+                        val isAudio = mimeType.startsWith("audio/") || mimeType == "application/ogg"
+                        val isVideo = mimeType.startsWith("video/")
 
-                    if (!isImage && !isPdf && !isAudio && !isVideo) {
-                        errorMessage = "Apenas Imagens, Vídeos, PDFs ou Áudios são suportados."
-                        isUploading = false
-                        return@launch
-                    }
-
-                    val fileDescriptor = context.contentResolver.openAssetFileDescriptor(uri, "r")
-                    val fileSize = fileDescriptor?.length ?: 0L
-                    fileDescriptor?.close()
-
-                    val fileSizeInMB = fileSize / (1024.0 * 1024.0)
-                    if (fileSizeInMB > 15.0) {
-                        val sizeStr = (fileSizeInMB * 10.0).toInt() / 10.0
-                        errorMessage = "Oops! O arquivo tem ${sizeStr} MB. O limite de envio é 15 MB! 😅"
-                        isUploading = false
-                        return@launch
-                    }
-
-                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    if (bytes != null) {
-                        val extension = when {
-                            isImage -> ".jpg"
-                            isPdf -> ".pdf"
-                            isAudio -> ".mp3"
-                            else -> ".mp4"
-                        }
-                        val fileName = "${UUID.randomUUID()}$extension"
-
-                        SupabaseClient.client.storage.from("resenha").upload(fileName, bytes)
-                        val publicUrl = SupabaseClient.client.storage.from("resenha").publicUrl(fileName)
-
-                        val timeFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
-                        timeFormat.timeZone = TimeZone.getTimeZone("UTC")
-                        val currentTime = timeFormat.format(Date())
-
-                        val contentStr = when {
-                            isImage -> "📷 Imagem"
-                            isPdf -> "📄 Arquivo PDF"
-                            isAudio -> "🎵 Áudio"
-                            else -> "🎥 Vídeo"
-                        }
-                        val typeStr = when {
-                            isImage -> "image"
-                            isPdf -> "pdf"
-                            isAudio -> "audio"
-                            else -> "video"
+                        if (!isImage && !isPdf && !isAudio && !isVideo) {
+                            errorMessage = "Apenas Imagens, Vídeos, PDFs ou Áudios são suportados."
+                            isUploading = false
+                            return@launch
                         }
 
-                        SupabaseClient.client.from("messages").insert(
-                            mapOf(
-                                "conversation_id" to conversationId,
-                                "sender_id" to currentUserId,
-                                "content" to contentStr,
-                                "status" to "enviada",
-                                "media_url" to publicUrl,
-                                "media_type" to typeStr
-                            )
-                        )
-                        SupabaseClient.client.from("conversations").update(
-                            {
-                                set("last_message", contentStr)
-                                set("last_message_sender_id", currentUserId)
-                                set("last_message_status", "enviada")
-                                set("last_message_time", currentTime)
+                        val fileDescriptor =
+                            context.contentResolver.openAssetFileDescriptor(uri, "r")
+                        val fileSize = fileDescriptor?.length ?: 0L
+                        fileDescriptor?.close()
+
+                        val fileSizeInMB = fileSize / (1024.0 * 1024.0)
+                        if (fileSizeInMB > 15.0) {
+                            val sizeStr = (fileSizeInMB * 10.0).toInt() / 10.0
+                            errorMessage =
+                                "Oops! O arquivo tem ${sizeStr} MB. O limite de envio é 15 MB! 😅"
+                            isUploading = false
+                            return@launch
+                        }
+
+                        val bytes =
+                            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        if (bytes != null) {
+                            val extension = when {
+                                isImage -> ".jpg"
+                                isPdf -> ".pdf"
+                                isAudio -> ".mp3"
+                                else -> ".mp4"
                             }
-                        ) { filter { eq("id", conversationId) } }
+                            val fileName = "${UUID.randomUUID()}$extension"
 
-                        recarregarMensagens()
+                            SupabaseClient.client.storage.from("resenha").upload(fileName, bytes)
+                            val publicUrl =
+                                SupabaseClient.client.storage.from("resenha").publicUrl(fileName)
+
+                            val timeFormat = SimpleDateFormat(
+                                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+                                Locale.getDefault()
+                            )
+                            timeFormat.timeZone = TimeZone.getTimeZone("UTC")
+                            val currentTime = timeFormat.format(Date())
+
+                            val contentStr = when {
+                                isImage -> "📷 Imagem"
+                                isPdf -> "📄 Arquivo PDF"
+                                isAudio -> "🎵 Áudio"
+                                else -> "🎥 Vídeo"
+                            }
+                            val typeStr = when {
+                                isImage -> "image"
+                                isPdf -> "pdf"
+                                isAudio -> "audio"
+                                else -> "video"
+                            }
+
+                            SupabaseClient.client.from("messages").insert(
+                                mapOf(
+                                    "conversation_id" to conversationId,
+                                    "sender_id" to currentUserId,
+                                    "content" to CryptoUtils.encrypt(contentStr),
+                                    "status" to "enviada",
+                                    "media_url" to publicUrl,
+                                    "media_type" to typeStr
+                                )
+                            )
+                            SupabaseClient.client.from("conversations").update(
+                                {
+                                    set("last_message", CryptoUtils.encrypt(contentStr))
+                                    set("last_message_sender_id", currentUserId)
+                                    set("last_message_status", "enviada")
+                                    set("last_message_time", currentTime)
+                                }
+                            ) { filter { eq("id", conversationId) } }
+
+                            recarregarMensagens()
+                        }
+                    } catch (e: Exception) {
+                        errorMessage = "Erro ao enviar arquivo: ${e.message}"
+                    } finally {
+                        isUploading = false
                     }
-                } catch (e: Exception) {
-                    errorMessage = "Erro ao enviar arquivo: ${e.message}"
-                } finally {
-                    isUploading = false
                 }
             }
         }
-    }
 
     LaunchedEffect(conversationId) {
         recarregarMensagens()
@@ -518,7 +583,10 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
         scope.launch {
             repeat(10) { attempt ->
                 try {
-                    android.util.Log.d("CHAT_SCREEN", "Tentativa ${attempt + 1}/10 para ID: $conversationId")
+                    android.util.Log.d(
+                        "CHAT_SCREEN",
+                        "Tentativa ${attempt + 1}/10 para ID: $conversationId"
+                    )
 
                     val convs = SupabaseClient.client.from("conversations")
                         .select { filter { eq("id", conversationId) } }
@@ -531,7 +599,10 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         // se der ruim tirar
                         isGroup = conv.is_group
                         //
-                        android.util.Log.d("CHAT_SCREEN", "Conversa encontrada: ${conv.name} (is_group=${conv.is_group})")
+                        android.util.Log.d(
+                            "CHAT_SCREEN",
+                            "Conversa encontrada: ${conv.name} (is_group=${conv.is_group})"
+                        )
 
                         if (conv.is_group) {
                             contactName = conv.name ?: "Grupo Sem Nome"
@@ -554,7 +625,10 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         return@launch  // ✅ SAI DO LOOP
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("CHAT_SCREEN", "Tentativa ${attempt + 1} falhou: ${e.message}")
+                    android.util.Log.e(
+                        "CHAT_SCREEN",
+                        "Tentativa ${attempt + 1} falhou: ${e.message}"
+                    )
                 }
 
                 contactName = "Carregando... (${attempt + 1}/10)"
@@ -564,7 +638,6 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
             android.util.Log.e("CHAT_SCREEN", "❌ Falhou após 10 tentativas para $conversationId")
             contactName = "Erro: conversa não encontrada"
         }
-
 
         scope.launch {
             try {
@@ -610,6 +683,93 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
 //----- fim
 
 
+    // --- CAIXA DE DIÁLOGO DE EXCLUSÃO ---
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = {
+                Text(
+                    text = "Eliminar Resenha",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black
+                )
+            },
+            text = {
+                Text(
+                    text = "Tem a certeza que deseja apagar esta conversa para sempre? Todas as mensagens e os seus ficheiros de multimédia serão eliminados.",
+                    color = Color.DarkGray
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteDialog = false
+                    isUploading = true
+
+                    scope.launch {
+                        try {
+                            val myMediaMsgs = SupabaseClient.client.from("messages")
+                                .select {
+                                    filter {
+                                        eq("conversation_id", conversationId)
+                                        eq("sender_id", currentUserId)
+                                    }
+                                }
+                                .decodeList<ChatMessage>()
+
+                            val mediaUrls = myMediaMsgs.mapNotNull { it.media_url }
+                                .filter { it.contains("supabase.co/storage/v1/object/public/resenha/") }
+
+                            if (mediaUrls.isNotEmpty()) {
+                                val fileNames = mediaUrls.map { it.substringAfterLast("/") }
+                                try {
+                                    SupabaseClient.client.storage.from("resenha").delete(fileNames)
+                                } catch (e: Exception) {
+                                }
+                            }
+
+                            // Plano B: Tentar apagar mensagens caso o Cascade falhe
+                            try {
+                                SupabaseClient.client.from("messages").delete {
+                                    filter { eq("conversation_id", conversationId) }
+                                }
+                            } catch (e: Exception) {
+                            }
+
+                            SupabaseClient.client.from("conversations").delete {
+                                filter { eq("id", conversationId) }
+                            }
+
+                            isUploading = false
+                            onBack()
+                        } catch (e: Exception) {
+                            isUploading = false
+                            errorMessage =
+                                "Erro ao eliminar: Certifique-se de que ativou o Cascade no Supabase!"
+                        }
+                    }
+                }) { Text("Eliminar Tudo", color = Color.Red, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text(
+                        "Cancelar",
+                        color = Color.Black
+                    )
+                }
+            },
+            containerColor = Color.White
+        )
+    }
+
+    // --- LÓGICA DE FILTRAGEM LOCAL DE MENSAGENS ---
+    val displayedMessages = remember(messages, searchQuery) {
+        if (searchQuery.isBlank()) {
+            messages
+        } else {
+            messages.filter { it.content.contains(searchQuery, ignoreCase = true) }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -618,19 +778,26 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         AsyncImage(
                             model = coil.request.ImageRequest.Builder(LocalContext.current)
-                                .data(contactImageUrl ?: "https://ui-avatars.com/api/?name=$contactName&background=94ADFF&color=fff")
+                                .data(
+                                    contactImageUrl
+                                        ?: "https://ui-avatars.com/api/?name=$contactName&background=94ADFF&color=fff"
+                                )
                                 .crossfade(true)
                                 .build(),
                             contentDescription = null,
-                            modifier = Modifier.size(36.dp).clip(CircleShape).background(Color.LightGray),
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color.LightGray),
                             contentScale = ContentScale.Crop
                         )
                         Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        contactName,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black)
-                      //implementando o gerenciador de grupo
+                        Text(
+                            contactName,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                        //implementando o gerenciador de grupo
                         if (isGroup) {  // Você define isso carregando conv.is_group
                             Spacer(Modifier.width(8.dp))
                             IconButton(
@@ -646,18 +813,26 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         }
                         //---fim
                     }
-                        },
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.Black) }
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            null,
+                            tint = Color.Black
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
             )
         },
         containerColor = Color(0xFFF5F7FF)
     ) { padding ->
-        Column(modifier = Modifier
-            .padding(padding)
-            .fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+        ) {
             //---- bruna
             val groupedMessages = messages.groupBy { formatHeaderDate(it.created_at) }
 
@@ -686,7 +861,10 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                             if (!isMine) {
                                 AsyncImage(
                                     model = coil.request.ImageRequest.Builder(LocalContext.current)
-                                        .data(contactImageUrl ?: "https://ui-avatars.com/api/?name=$contactName&background=94ADFF&color=fff")
+                                        .data(
+                                            contactImageUrl
+                                                ?: "https://ui-avatars.com/api/?name=$contactName&background=94ADFF&color=fff"
+                                        )
                                         .crossfade(true)
                                         .build(),
                                     contentDescription = "Avatar",
@@ -788,7 +966,11 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                                 modifier = Modifier
                                                     .fillMaxWidth(0.6f)
                                                     .clip(RoundedCornerShape(24.dp))
-                                                    .background(if (isMine) Color.White.copy(alpha = 0.2f) else blueColor.copy(alpha = 0.1f))
+                                                    .background(
+                                                        if (isMine) Color.White.copy(alpha = 0.2f) else blueColor.copy(
+                                                            alpha = 0.1f
+                                                        )
+                                                    )
                                                     .padding(4.dp)
                                             ) {
                                                 val isPlaying = currentlyPlayingId == msg.id
@@ -800,7 +982,8 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                                         try {
                                                             mediaPlayer.reset()
                                                             mediaPlayer.setOnErrorListener { _, _, _ ->
-                                                                errorMessage = "Formato não suportado."
+                                                                errorMessage =
+                                                                    "Formato não suportado."
                                                                 currentlyPlayingId = null
                                                                 true
                                                             }
@@ -814,7 +997,8 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                                                 currentlyPlayingId = null
                                                             }
                                                         } catch (e: Exception) {
-                                                            errorMessage = "Erro ao iniciar o áudio: ${e.message}"
+                                                            errorMessage =
+                                                                "Erro ao iniciar o áudio: ${e.message}"
                                                         }
                                                     }
                                                 }) {
@@ -866,8 +1050,12 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
 
                                             if (isMine) {
                                                 Spacer(modifier = Modifier.width(4.dp))
-                                                val icon = if (msg.status == "enviada") Icons.Default.Check else Icons.Default.DoneAll
-                                                val iconTint = if (msg.status == "lida") Color(0xFF4CAF50) else Color.White.copy(alpha = 0.8f)
+                                                val icon =
+                                                    if (msg.status == "enviada") Icons.Default.Check else Icons.Default.DoneAll
+                                                val iconTint =
+                                                    if (msg.status == "lida") Color(0xFF4CAF50) else Color.White.copy(
+                                                        alpha = 0.8f
+                                                    )
                                                 Icon(
                                                     imageVector = icon,
                                                     contentDescription = null,
@@ -896,7 +1084,10 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
                                 modifier = Modifier
-                                    .background(Color.Black.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                                    .background(
+                                        Color.Black.copy(alpha = 0.05f),
+                                        RoundedCornerShape(12.dp)
+                                    )
                                     .padding(horizontal = 12.dp, vertical = 4.dp)
                             )
                         }
@@ -945,15 +1136,19 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 }
             }
 
-            Row(modifier = Modifier
-                .fillMaxWidth()
-                .background(Color.White)
-                .padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White)
+                    .padding(8.dp), verticalAlignment = Alignment.CenterVertically
+            ) {
                 if (isUploading) {
                     Spacer(modifier = Modifier.weight(1f))
-                    CircularProgressIndicator(modifier = Modifier
-                        .size(48.dp)
-                        .padding(8.dp), color = blueColor)
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .padding(8.dp), color = blueColor
+                    )
                     Spacer(modifier = Modifier.weight(1f))
                 } else if (isRecording) {
                     Text(
@@ -974,7 +1169,11 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
 
                     Box {
                         IconButton(onClick = { showAttachmentMenu = true }) {
-                            Icon(Icons.Default.AttachFile, contentDescription = "Anexos", tint = blueColor)
+                            Icon(
+                                Icons.Default.AttachFile,
+                                contentDescription = "Anexos",
+                                tint = blueColor
+                            )
                         }
 
                         DropdownMenu(
@@ -984,7 +1183,13 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         ) {
                             DropdownMenuItem(
                                 text = { Text("Galeria / Arquivos", color = Color.Black) },
-                                leadingIcon = { Icon(Icons.Default.Image, contentDescription = null, tint = blueColor) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Image,
+                                        contentDescription = null,
+                                        tint = blueColor
+                                    )
+                                },
                                 onClick = {
                                     showAttachmentMenu = false
                                     fileLauncher.launch("*/*")
@@ -992,15 +1197,26 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                             )
                             DropdownMenuItem(
                                 text = { Text("Câmera", color = Color.Black) },
-                                leadingIcon = { Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = blueColor) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.PhotoCamera,
+                                        contentDescription = null,
+                                        tint = blueColor
+                                    )
+                                },
                                 onClick = {
                                     showAttachmentMenu = false
-                                    val hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                                    val hasPermission = ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.CAMERA
+                                    ) == PackageManager.PERMISSION_GRANTED
                                     if (hasPermission) {
                                         try {
-                                            val imagesFolder = File(context.cacheDir, "camera_images")
+                                            val imagesFolder =
+                                                File(context.cacheDir, "camera_images")
                                             imagesFolder.mkdirs()
-                                            val tempImageFile = File(imagesFolder, "foto_${UUID.randomUUID()}.jpg")
+                                            val tempImageFile =
+                                                File(imagesFolder, "foto_${UUID.randomUUID()}.jpg")
 
                                             val uri = FileProvider.getUriForFile(
                                                 context,
@@ -1010,7 +1226,8 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                             cameraImageUri = uri
                                             takePictureLauncher.launch(uri)
                                         } catch (e: Exception) {
-                                            errorMessage = "Erro ao abrir câmera. Verifique o FileProvider."
+                                            errorMessage =
+                                                "Erro ao abrir câmera. Verifique o FileProvider."
                                         }
                                     } else {
                                         cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
@@ -1019,19 +1236,35 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                             )
                             DropdownMenuItem(
                                 text = { Text("Localização Atual", color = Color.Black) },
-                                leadingIcon = { Icon(Icons.Default.LocationOn, contentDescription = null, tint = blueColor) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.LocationOn,
+                                        contentDescription = null,
+                                        tint = blueColor
+                                    )
+                                },
                                 onClick = {
                                     showAttachmentMenu = false
-                                    val hasFineLocation = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                                    val hasCoarseLocation = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                                    val hasFineLocation = ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.ACCESS_FINE_LOCATION
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                    val hasCoarseLocation = ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
+                                    ) == PackageManager.PERMISSION_GRANTED
 
                                     if (hasFineLocation || hasCoarseLocation) {
                                         try {
                                             locationClient.lastLocation.addOnSuccessListener { location ->
                                                 if (location != null) {
-                                                    sendLocationMessage(location.latitude, location.longitude)
+                                                    sendLocationMessage(
+                                                        location.latitude,
+                                                        location.longitude
+                                                    )
                                                 } else {
-                                                    errorMessage = "GPS não encontrou sua posição. Abra o Google Maps uma vez e tente novamente."
+                                                    errorMessage =
+                                                        "GPS não encontrou sua posição. Abra o Google Maps uma vez e tente novamente."
                                                 }
                                             }
                                         } catch (e: SecurityException) {
@@ -1039,7 +1272,10 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                         }
                                     } else {
                                         locationPermissionLauncher.launch(
-                                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                                            arrayOf(
+                                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                                Manifest.permission.ACCESS_COARSE_LOCATION
+                                            )
                                         )
                                     }
                                 }
@@ -1053,31 +1289,41 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                         modifier = Modifier.weight(1f),
                         placeholder = { Text("Mensagem...", color = Color.Black) },
                         shape = RoundedCornerShape(24.dp),
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.Black, unfocusedTextColor = Color.Black, cursorColor = Color.Black, focusedBorderColor = blueColor)
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.Black,
+                            unfocusedTextColor = Color.Black,
+                            cursorColor = Color.Black,
+                            focusedBorderColor = blueColor
+                        )
                     )
                     Spacer(modifier = Modifier.width(8.dp))
 
                     if (messageText.trim().isEmpty()) {
                         IconButton(
                             onClick = {
-                                val hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                                val hasPermission = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) == PackageManager.PERMISSION_GRANTED
                                 if (hasPermission) {
                                     try {
-                                        val file = File(context.cacheDir, "voz_${UUID.randomUUID()}.m4a")
+                                        val file =
+                                            File(context.cacheDir, "voz_${UUID.randomUUID()}.m4a")
                                         audioTempFile = file
-                                        mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                            MediaRecorder(context)
-                                        } else {
-                                            @Suppress("DEPRECATION")
-                                            MediaRecorder()
-                                        }.apply {
-                                            setAudioSource(MediaRecorder.AudioSource.MIC)
-                                            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                                            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                                            setOutputFile(file.absolutePath)
-                                            prepare()
-                                            start()
-                                        }
+                                        mediaRecorder =
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                                MediaRecorder(context)
+                                            } else {
+                                                @Suppress("DEPRECATION")
+                                                MediaRecorder()
+                                            }.apply {
+                                                setAudioSource(MediaRecorder.AudioSource.MIC)
+                                                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                                                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                                                setOutputFile(file.absolutePath)
+                                                prepare()
+                                                start()
+                                            }
                                         isRecording = true
                                     } catch (e: Exception) {
                                         errorMessage = "Erro ao gravar: ${e.message}"
@@ -1086,7 +1332,10 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                     recordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
                             },
-                            modifier = Modifier.background(blueColor.copy(alpha = 0.2f), CircleShape)
+                            modifier = Modifier.background(
+                                blueColor.copy(alpha = 0.2f),
+                                CircleShape
+                            )
                         ) {
                             Icon(Icons.Default.Mic, null, tint = blueColor)
                         }
@@ -1100,24 +1349,58 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                     try {
                                         val isImageUrl = textToSend.startsWith("http") &&
                                                 (textToSend.endsWith(".jpg", ignoreCase = true) ||
-                                                        textToSend.endsWith(".png", ignoreCase = true) ||
-                                                        textToSend.endsWith(".jpeg", ignoreCase = true) ||
-                                                        textToSend.endsWith(".gif", ignoreCase = true) ||
-                                                        textToSend.endsWith(".webp", ignoreCase = true))
+                                                        textToSend.endsWith(
+                                                            ".png",
+                                                            ignoreCase = true
+                                                        ) ||
+                                                        textToSend.endsWith(
+                                                            ".jpeg",
+                                                            ignoreCase = true
+                                                        ) ||
+                                                        textToSend.endsWith(
+                                                            ".gif",
+                                                            ignoreCase = true
+                                                        ) ||
+                                                        textToSend.endsWith(
+                                                            ".webp",
+                                                            ignoreCase = true
+                                                        ))
 
-                                        val isPdfUrl = textToSend.startsWith("http") && textToSend.endsWith(".pdf", ignoreCase = true)
+                                        val isPdfUrl =
+                                            textToSend.startsWith("http") && textToSend.endsWith(
+                                                ".pdf",
+                                                ignoreCase = true
+                                            )
 
                                         val isAudioUrl = textToSend.startsWith("http") &&
                                                 (textToSend.endsWith(".mp3", ignoreCase = true) ||
-                                                        textToSend.endsWith(".wav", ignoreCase = true) ||
-                                                        textToSend.endsWith(".ogg", ignoreCase = true) ||
-                                                        textToSend.endsWith(".m4a", ignoreCase = true))
+                                                        textToSend.endsWith(
+                                                            ".wav",
+                                                            ignoreCase = true
+                                                        ) ||
+                                                        textToSend.endsWith(
+                                                            ".ogg",
+                                                            ignoreCase = true
+                                                        ) ||
+                                                        textToSend.endsWith(
+                                                            ".m4a",
+                                                            ignoreCase = true
+                                                        ))
 
                                         val isVideoUrl = textToSend.startsWith("http") &&
                                                 (textToSend.endsWith(".mp4", ignoreCase = true) ||
-                                                        textToSend.endsWith(".mov", ignoreCase = true) ||
-                                                        textToSend.endsWith(".mkv", ignoreCase = true) ||
-                                                        textToSend.endsWith(".webm", ignoreCase = true))
+                                                        textToSend.endsWith(
+                                                            ".mov",
+                                                            ignoreCase = true
+                                                        ) ||
+                                                        textToSend.endsWith(
+                                                            ".mkv",
+                                                            ignoreCase = true
+                                                        ) ||
+                                                        textToSend.endsWith(
+                                                            ".webm",
+                                                            ignoreCase = true
+                                                        ))
 
                                         val contentToSave = when {
                                             isImageUrl -> "📷 Imagem (Link)"
@@ -1126,7 +1409,8 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                             isVideoUrl -> "🎥 Vídeo (Link)"
                                             else -> textToSend
                                         }
-                                        val mediaUrlToSave = if (isImageUrl || isPdfUrl || isAudioUrl || isVideoUrl) textToSend else null
+                                        val mediaUrlToSave =
+                                            if (isImageUrl || isPdfUrl || isAudioUrl || isVideoUrl) textToSend else null
                                         val mediaTypeToSave = when {
                                             isImageUrl -> "image"
                                             isPdfUrl -> "pdf"
@@ -1135,7 +1419,10 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                             else -> null
                                         }
 
-                                        val timeFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
+                                        val timeFormat = SimpleDateFormat(
+                                            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+                                            Locale.getDefault()
+                                        )
                                         timeFormat.timeZone = TimeZone.getTimeZone("UTC")
                                         val currentTime = timeFormat.format(Date())
 
@@ -1143,7 +1430,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                             mapOf(
                                                 "conversation_id" to conversationId,
                                                 "sender_id" to currentUserId,
-                                                "content" to contentToSave,
+                                                "content" to CryptoUtils.encrypt(contentToSave),
                                                 "status" to "enviada",
                                                 "media_url" to mediaUrlToSave,
                                                 "media_type" to mediaTypeToSave
@@ -1151,7 +1438,10 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                                         )
                                         SupabaseClient.client.from("conversations").update(
                                             {
-                                                set("last_message", contentToSave)
+                                                set(
+                                                    "last_message",
+                                                    CryptoUtils.encrypt(contentToSave)
+                                                )
                                                 set("last_message_sender_id", currentUserId)
                                                 set("last_message_status", "enviada")
                                                 set("last_message_time", currentTime)
