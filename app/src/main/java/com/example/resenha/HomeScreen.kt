@@ -2,8 +2,9 @@ package com.example.resenha
 
 import android.annotation.SuppressLint
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -125,21 +126,14 @@ fun HomeScreen(
     fun loadConversations() {
         scope.launch {
             try {
-//                val result =
-//                    SupabaseClient.client.from("conversations").select().decodeList<Conversation>()
-//                val myConversations =
-//                    result.filter { it.user_1 == currentUserId || it.user_2 == currentUserId }
-
                 val profiles =
                     SupabaseClient.client.from("users").select().decodeList<UserProfile>()
                 val usersMap = profiles.associateBy { it.id }
 
-                // -- alterado para receber os grupos - bruna
-
                 val myParticipations =
                     SupabaseClient.client.from("conversation_participants")
-                    .select { filter { eq("user_id", currentUserId) } }
-                    .decodeList<ConversationParticipant>()
+                        .select { filter { eq("user_id", currentUserId) } }
+                        .decodeList<ConversationParticipant>()
                 val myGroupIds = myParticipations.map { it.conversation_id }
 
                 val privateConvs = SupabaseClient.client.from("conversations")
@@ -158,11 +152,6 @@ fun HomeScreen(
 
                 val myConversations = (privateConvs + groupConvs).distinctBy { it.id }
 
-
-
-
-                //----- fim bruna
-
                 val unreadMsgs = SupabaseClient.client.from("messages")
                     .select {
                         filter {
@@ -174,7 +163,6 @@ fun HomeScreen(
                 val unreadMap =
                     unreadMsgs.groupBy { it.conversation_id }.mapValues { it.value.size }
 
-                // --- LÓGICA CORRIGIDA: DISPARO DA NOTIFICAÇÃO ---
                 val totalUnreadNow = unreadMsgs.size
 
                 if (!isInitialLoad) {
@@ -195,7 +183,6 @@ fun HomeScreen(
                 }
 
                 previousUnreadCount = totalUnreadNow
-                // ---------------------------------------------------
 
                 val mappedList = myConversations.map { conv ->
                     val displayContactName: String
@@ -205,16 +192,12 @@ fun HomeScreen(
                         displayContactName = conv.name ?: "Grupo Sem Nome"
                         displayImageUrl = conv.group_image_url
                     } else {
-                        //--
                         val u1 = conv.user_1 ?: ""
                         val u2 = conv.user_2 ?: ""
-                        //--
-                        //val otherUserId = if (conv.user_1 == currentUserId) conv.user_2 else conv.user_1
                         val otherUserId = if (u1 == currentUserId) u2 else u1
                         displayContactName = usersMap[otherUserId]?.name ?: "Usuário"
                         displayImageUrl = usersMap[otherUserId]?.profile_image_url
                     }
-                    //-----
 
                     val count = unreadMap[conv.id] ?: 0
                     ChatItemUiState(
@@ -307,20 +290,15 @@ fun HomeScreen(
             }
         }
     }
-    //-----
-    // Import essencial, garanta que ele esteja no topo do seu arquivo:
-// import com.example.resenha.data.UserProfile
 
     LaunchedEffect(Unit) {
         val userId = SupabaseClient.client.auth.currentUserOrNull()?.id
         if (userId != null) {
             try {
-                // Busca o usuário atualizado direto do banco
                 val user = SupabaseClient.client.from("users")
                     .select { filter { eq("id", userId) } }
-                    .decodeSingle<UserProfile>() // OBRIGATÓRIO TER <UserProfile>
+                    .decodeSingle<UserProfile>()
 
-                // Atualiza os estados
                 profileImageUrl = user.profile_image_url
                 userName = user.name
 
@@ -330,24 +308,22 @@ fun HomeScreen(
             }
         }
     }
- // --- bruna (criar um botão menu para a opção de ser uma nova conversa ou grupo)
+
     var showFabMenu by remember { mutableStateOf(false)}
 
     Scaffold(
         topBar = {
             TopAppBar(
-                //-------
                 navigationIcon = {
                     IconButton(
                         onClick = onProfileClick,
                         modifier = Modifier.padding(start = 8.dp)
                     ) {
-                        // Garantir que não enviaremos nome vazio pra API de avatar
                         val fallbackName = if (userName.isNotBlank()) userName else "User"
                         val finalUrl = profileImageUrl ?: "https://ui-avatars.com/api/?name=$fallbackName&background=94ADFF&color=fff"
 
                         AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current) // Usa o context local
+                            model = ImageRequest.Builder(LocalContext.current)
                                 .data(finalUrl)
                                 .crossfade(true)
                                 .build(),
@@ -360,8 +336,6 @@ fun HomeScreen(
                         )
                     }
                 },
-                //--------
-
                 title = { Text("Resenhas Ativas", fontWeight = FontWeight.Bold, color = Color.Black) },
                 actions = {
                     IconButton(onClick = onLogoutClick) {
@@ -379,14 +353,13 @@ fun HomeScreen(
 
             Box {
                 FloatingActionButton(
-                    onClick = { showFabMenu = true }, // Ao clicar, abre o menu em vez de ir direto
+                    onClick = { showFabMenu = true },
                     containerColor = blueColor,
                     contentColor = Color.White
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Nova Conversa")
                 }
 
-                // O Menu suspenso que aparece em cima do botão
                 DropdownMenu(
                     expanded = showFabMenu,
                     onDismissRequest = { showFabMenu = false },
@@ -399,7 +372,7 @@ fun HomeScreen(
                         },
                         onClick = {
                             showFabMenu = false
-                            onNewChatClick() // Chama a tela de busca antiga
+                            onNewChatClick()
                         }
                     )
                     DropdownMenuItem(
@@ -409,7 +382,7 @@ fun HomeScreen(
                         },
                         onClick = {
                             showFabMenu = false
-                            onNewGroupClick() // Chama a nova tela de criação de grupos
+                            onNewGroupClick()
                         }
                     )
                 }
@@ -448,7 +421,7 @@ fun HomeScreen(
                         blueColor = blueColor,
                         badgeColor = whatsappGreen,
                         onClick = { onConversationClick(item.conversation) },
-                        //onLongClick = { togglePin(item) }
+                        onLongClick = { togglePin(item) } // RESTAURADO O CLIQUE LONGO
                     )
                 }
             }
@@ -456,6 +429,7 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ConversationItem(
     item: ChatItemUiState,
@@ -463,7 +437,7 @@ fun ConversationItem(
     blueColor: Color,
     badgeColor: Color,
     onClick: () -> Unit,
-    //onLongClick: () -> Unit
+    onLongClick: () -> Unit // RESTAURADO AQUI
 ) {
 
     fun formatTimeDisplay(rawTime: String?): String {
@@ -490,14 +464,16 @@ fun ConversationItem(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
-            .clickable { onClick() },
+            .combinedClickable( // SUBSTITUÍDO O CLICKABLE SIMPLES PELO COMBINADO
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
 
-            // --- Bruna
             AsyncImage(
                 model = coil.request.ImageRequest.Builder(LocalContext.current)
                     .data(item.contactImageUrl ?: "https://ui-avatars.com/api/?name=${item.contactName}&background=94ADFF&color=fff")
@@ -510,7 +486,7 @@ fun ConversationItem(
                     .background(Color.LightGray),
                 contentScale = ContentScale.Crop
             )
-            // ----
+
             Spacer(modifier = Modifier.width(16.dp))
 
             Column(modifier = Modifier.weight(1f)) {
@@ -549,7 +525,6 @@ fun ConversationItem(
                         Spacer(modifier = Modifier.width(4.dp))
                     }
 
-                    // AQUI APLICAMOS A CRIPTOGRAFIA NA TELA INICIAL
                     val previewMessage = if (item.conversation.last_message.isNullOrEmpty()) {
                         "Inicie a conversa"
                     } else {
