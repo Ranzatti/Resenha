@@ -224,11 +224,11 @@ fun HomeScreen(
                         unreadCount = count)
                 }
 
-//                conversationsList = mappedList.sortedWith(
-//                    compareByDescending<ChatItemUiState> { it.conversation.is_pinned }
-//                        .thenByDescending { it.unreadCount > 0 }
-//                        .thenByDescending { it.conversation.last_message_time }
-//                )
+                conversationsList = mappedList.sortedWith(
+                    compareByDescending<ChatItemUiState> { it.conversation.is_pinned }
+                        .thenByDescending { it.unreadCount > 0 }
+                        .thenByDescending { it.conversation.last_message_time }
+                )
 
                 val convsToUpdate = mappedList.filter {
                     it.conversation.last_message_sender_id != currentUserId &&
@@ -264,24 +264,24 @@ fun HomeScreen(
         }
     }
 
-//
-//    fun togglePin(item: ChatItemUiState) {
-//        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-//        scope.launch {
-//            try {
-//                SupabaseClient.client.from("conversations").update(
-//                    {
-//                        set("is_pinned", !item.conversation.is_pinned)
-//                    }
-//                ) {
-//                    filter { eq("id", item.conversation.id) }
-//                }
-//                loadConversations()
-//            } catch (e: Exception) {
-//                println("Erro ao fixar: ${e.message}")
-//            }
-//        }
-//    }
+
+    fun togglePin(item: ChatItemUiState) {
+        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+        scope.launch {
+            try {
+                SupabaseClient.client.from("conversations").update(
+                    {
+                        set("is_pinned", !item.conversation.is_pinned)
+                    }
+                ) {
+                    filter { eq("id", item.conversation.id) }
+                }
+                loadConversations()
+            } catch (e: Exception) {
+                println("Erro ao fixar: ${e.message}")
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         loadConversations()
@@ -537,17 +537,17 @@ fun ConversationItem(
                         Spacer(modifier = Modifier.width(4.dp))
                     }
 
-//                    if (item.conversation.is_pinned) {
-//                        Icon(
-//                            imageVector = Icons.Default.PushPin,
-//                            contentDescription = null,
-//                            modifier = Modifier
-//                                .size(16.dp)
-//                                .rotate(45f),
-//                            tint = blueColor
-//                        )
-//                        Spacer(modifier = Modifier.width(4.dp))
-//                    }
+                    if (item.conversation.is_pinned) {
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .rotate(45f),
+                            tint = blueColor
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
 
                     // AQUI APLICAMOS A CRIPTOGRAFIA NA TELA INICIAL
                     val previewMessage = if (item.conversation.last_message.isNullOrEmpty()) {
