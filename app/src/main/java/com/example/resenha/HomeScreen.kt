@@ -3,7 +3,7 @@ package com.example.resenha
 import android.annotation.SuppressLint
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -224,11 +224,11 @@ fun HomeScreen(
                         unreadCount = count)
                 }
 
-                conversationsList = mappedList.sortedWith(
-                    compareByDescending<ChatItemUiState> { it.conversation.is_pinned }
-                        .thenByDescending { it.unreadCount > 0 }
-                        .thenByDescending { it.conversation.last_message_time }
-                )
+//                conversationsList = mappedList.sortedWith(
+//                    compareByDescending<ChatItemUiState> { it.conversation.is_pinned }
+//                        .thenByDescending { it.unreadCount > 0 }
+//                        .thenByDescending { it.conversation.last_message_time }
+//                )
 
                 val convsToUpdate = mappedList.filter {
                     it.conversation.last_message_sender_id != currentUserId &&
@@ -264,24 +264,24 @@ fun HomeScreen(
         }
     }
 
-
-    fun togglePin(item: ChatItemUiState) {
-        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-        scope.launch {
-            try {
-                SupabaseClient.client.from("conversations").update(
-                    {
-                        set("is_pinned", !item.conversation.is_pinned)
-                    }
-                ) {
-                    filter { eq("id", item.conversation.id) }
-                }
-                loadConversations()
-            } catch (e: Exception) {
-                println("Erro ao fixar: ${e.message}")
-            }
-        }
-    }
+//
+//    fun togglePin(item: ChatItemUiState) {
+//        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+//        scope.launch {
+//            try {
+//                SupabaseClient.client.from("conversations").update(
+//                    {
+//                        set("is_pinned", !item.conversation.is_pinned)
+//                    }
+//                ) {
+//                    filter { eq("id", item.conversation.id) }
+//                }
+//                loadConversations()
+//            } catch (e: Exception) {
+//                println("Erro ao fixar: ${e.message}")
+//            }
+//        }
+//    }
 
     LaunchedEffect(Unit) {
         loadConversations()
@@ -448,7 +448,7 @@ fun HomeScreen(
                         blueColor = blueColor,
                         badgeColor = whatsappGreen,
                         onClick = { onConversationClick(item.conversation) },
-                        onLongClick = { togglePin(item) }
+                        //onLongClick = { togglePin(item) }
                     )
                 }
             }
@@ -463,7 +463,7 @@ fun ConversationItem(
     blueColor: Color,
     badgeColor: Color,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    //onLongClick: () -> Unit
 ) {
 
     fun formatTimeDisplay(rawTime: String?): String {
@@ -490,10 +490,7 @@ fun ConversationItem(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
-            .combinedClickable(
-                onClick = { onClick() },
-                onLongClick = { onLongClick() }
-            ),
+            .clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(2.dp)
@@ -540,17 +537,17 @@ fun ConversationItem(
                         Spacer(modifier = Modifier.width(4.dp))
                     }
 
-                    if (item.conversation.is_pinned) {
-                        Icon(
-                            imageVector = Icons.Default.PushPin,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(16.dp)
-                                .rotate(45f),
-                            tint = blueColor
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                    }
+//                    if (item.conversation.is_pinned) {
+//                        Icon(
+//                            imageVector = Icons.Default.PushPin,
+//                            contentDescription = null,
+//                            modifier = Modifier
+//                                .size(16.dp)
+//                                .rotate(45f),
+//                            tint = blueColor
+//                        )
+//                        Spacer(modifier = Modifier.width(4.dp))
+//                    }
 
                     // AQUI APLICAMOS A CRIPTOGRAFIA NA TELA INICIAL
                     val previewMessage = if (item.conversation.last_message.isNullOrEmpty()) {
