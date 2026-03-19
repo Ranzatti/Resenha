@@ -1,9 +1,12 @@
 # Resenha 💬
 
-[![Kotlin](https://img.shields.io/badge/Kotlin-1.9+-purple.svg)](https://kotlinlang.org)
-[![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-1.6.1+-blue.svg)](https://developer.android.com/jetpack/compose)
-[![MinSDK](https://img.shields.io/badge/MinSDK-24-brightgreen.svg)](https://developer.android.com/about/versions/nougat)
-[![TargetSDK](https://img.shields.io/badge/TargetSDK-34-brightgreen.svg)](https://developer.android.com/about/versions/14)
+[![Kotlin](https://img.shields.io/badge/Kotlin-B125EA?style=for-the-badge&logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Gradle](https://img.shields.io/badge/gradle-02303A?style=for-the-badge&logo=gradle&logoColor=white)](https://gradle.org)
+[![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com)
+[![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-4285F4?style=for-the-badge&logo=Jetpack%20Compose&logoColor=white)](https://developer.android.com/jetpack/compose)
+[![Firebase](https://img.shields.io/badge/firebase-ffca28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com)
+[![Supabase](https://img.shields.io/badge/Supabase-181818?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com)
+[![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)](https://github.com)
 
 > **Resenha** é um aplicativo de mensagens em Kotlin com Jetpack Compose, oferecendo conversas
 > privadas e em grupo com suporte a anexos (imagem, vídeo, PDF, áudio), compartilhamento de
